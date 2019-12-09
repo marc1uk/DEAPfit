@@ -1,0 +1,105 @@
+{
+//========= Macro generated from object: ahist_1300dO000000_0__271__1/1300V Charge Distribution WB012
+//========= by ROOT version6.06/08
+   
+   TH1F *ahist_1300dO000000_0__271__1__1 = new TH1F("ahist_1300dO000000_0__271__1__1","1300V Charge Distribution WB012",100,-1.4e+06,1.04e+07);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(9,33);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(10,272);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(11,1370);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(12,3274);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(13,4107);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(14,2892);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(15,1269);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(16,413);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(17,187);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(18,203);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(19,159);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(20,161);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(21,191);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(22,157);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(23,186);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(24,205);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(25,218);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(26,230);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(27,227);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(28,239);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(29,218);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(30,232);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(31,171);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(32,148);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(33,108);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(34,90);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(35,83);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(36,76);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(37,56);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(38,59);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(39,37);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(40,30);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(41,30);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(42,24);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(43,23);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(44,14);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(45,14);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(46,13);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(47,9);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(48,10);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(49,6);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(50,4);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(51,13);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(52,7);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(53,10);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(54,3);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(55,3);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(56,4);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(57,7);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(58,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(59,5);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(60,2);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(62,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(63,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(66,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(69,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(71,2);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(81,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(89,1);
+   ahist_1300dO000000_0__271__1__1->SetBinContent(93,1);
+   ahist_1300dO000000_0__271__1__1->SetEntries(17512);
+   
+   TPaveStats *ptstats = new TPaveStats(0.78,0.775,0.98,0.935,"brNDC");
+   ptstats->SetName("stats");
+   ptstats->SetBorderSize(1);
+   ptstats->SetFillColor(0);
+   ptstats->SetTextAlign(12);
+   ptstats->SetTextFont(42);
+   TText *AText = ptstats->AddText("ahist_1300dO000000_0__271__1");
+   AText->SetTextSize(0.0368);
+   AText = ptstats->AddText("Entries = 17512  ");
+   AText = ptstats->AddText("Mean  = 4.487e+05");
+   AText = ptstats->AddText("Std Dev   = 8.263e+05");
+   ptstats->SetOptStat(1111);
+   ptstats->SetOptFit(0);
+   ptstats->Draw();
+   ahist_1300dO000000_0__271__1__1->GetListOfFunctions()->Add(ptstats);
+   ptstats->SetParent(ahist_1300dO000000_0__271__1__1);
+
+   Int_t ci;      // for color index setting
+   TColor *color; // for color definition with alpha
+   ci = TColor::GetColor("#000099");
+   ahist_1300dO000000_0__271__1__1->SetLineColor(ci);
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetTitle("Charge (e)");
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetRange(1,63);
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetLabelFont(42);
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetLabelSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetTitleSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetXaxis()->SetTitleFont(42);
+   ahist_1300dO000000_0__271__1__1->GetYaxis()->SetTitle("Num Entries");
+   ahist_1300dO000000_0__271__1__1->GetYaxis()->SetLabelFont(42);
+   ahist_1300dO000000_0__271__1__1->GetYaxis()->SetLabelSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetYaxis()->SetTitleSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetYaxis()->SetTitleFont(42);
+   ahist_1300dO000000_0__271__1__1->GetZaxis()->SetLabelFont(42);
+   ahist_1300dO000000_0__271__1__1->GetZaxis()->SetLabelSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetZaxis()->SetTitleSize(0.035);
+   ahist_1300dO000000_0__271__1__1->GetZaxis()->SetTitleFont(42);
+   ahist_1300dO000000_0__271__1__1->Draw("");
+}

@@ -1,0 +1,109 @@
+// first: copy-paste the code from DEAP_rootscript_1.C
+// this defines the globals and sets the ranges,
+// loads the histogram and fixes the X-axis to pC
+
+// second: set ROOT into raw mode by entering .rawInput
+// then copy-paste the function definitions from DEAP_rootscript.C
+// then leave raw input mode by entering .rawInput again
+
+// finally execute the code below, to define a pedestal for viewing,
+// an SPE function for viewing,
+// a convolution for viewing,
+// or a full fit function for viewing
+
+//TF1* pedfit = new TF1("pedfit","TMath::Gaus(x, [0], [1], true)",-0.2,0.5);
+//pedfit->SetParameters(0.012127,0.0253868);
+//TF1* spefunc = new TF1("spefunc",SPE_Func,-0.2,1.0,8);
+//spefunc->SetParameters(50,0.3,10,14,0.3,0.6,8,5);
+//TF1Convolution* conv = new TF1Convolution(pedfit,spefunc,-0.2,1.0,true);
+//conv->SetRange(-0.2,1.0);
+//TF1* convfunc = new TF1("convfunc",*conv,-0.2,1,conv->GetNpar());
+//for(int i=0; i<2; ++i){ convfunc->SetParameter(i,pedfit->GetParameter(i)); }
+//for(int i=2; i<convfunc->GetNpar(); ++i){ convfunc->SetParameter(i,spefunc->GetParameter(i-2)); }
+//convfunc->Draw("same");
+
+TF1* full_fit_func = new TF1("full_fit_func",FullFitFunction,-0.2,1.0,14);
+// cannot call SetParameters with >11 parameters: must pass them via an array
+double pars[]={2.156,  //  0: prescaling_B
+               100, //  1: ped_scaling
+               0.012127,  //  2: ped_mean
+               0.0253868, //  3: ped_sigma
+               25.6667,   //  4: spe_firstgamma_scaling
+               0.3,  //  5: spe_firstgamma_mean
+               10,   //  6: spe_firstgamma_mean
+               14,   //  7: spe_secondgamma_scaling
+               0.3,  //  8: spe_secondgamma_mean_scaling
+               0.6,  //  9: spe_secondgamma_shape_scaling
+               1,    // 10: spe_expl_scaling
+               5,    // 11: spe_expl_charge_scaling
+               0.0016,  // 12: mean_npe
+               2};   // 13: max_pes
+full_fit_func->SetParameters(pars);
+full_fit_func->SetParName(0,"prescaling");
+full_fit_func->SetParName(1,"ped_scaling");
+full_fit_func->SetParName(2,"ped_mean");
+full_fit_func->SetParName(3,"ped_sigma");
+full_fit_func->SetParName(4,"spe_firstgamma_scaling");
+full_fit_func->SetParName(5,"spe_firstgamma_mean");
+full_fit_func->SetParName(6,"spe_firstgamma_shape");
+full_fit_func->SetParName(7,"spe_secondgamma_scaling");
+full_fit_func->SetParName(8,"spe_secondgamma_mean_scaling");
+full_fit_func->SetParName(9,"spe_secondgamma_shape_scaling");
+full_fit_func->SetParName(10,"spe_expl_scaling");
+full_fit_func->SetParName(11,"spe_expl_charge_scaling");
+full_fit_func->SetParName(12,"mean_npe");
+full_fit_func->SetParName(13,"max_pes");
+
+// this set seems to work well for up to 1pe
+3, 100, 0.012127, 0.0253868, 50, 0.3, 10, 14, 0.3, 0.6, 8, 5, 1, 1,
+
+
+// constants: these worked at various stages of debug
+// these ranges were for gain1300V_WB012, whose range was -0.2 to 1.0 after conversion to pC
+ped_range_min=-0.2;    // lower range of the pedestal gaussian function
+ped_range_max=0.5;     // upper range of the pedestal gaussian function
+spe_range_min=-0.2;    // lower range of the SPE function
+spe_range_max=1.0;    // upper range of the SPE function
+npe_func_min=-0.2;     // each npe function requires a range, but specifying many ranges seems overkill
+npe_func_max=3.0;     // they'll probably all need to have a range covering the full span of charges
+double pedestal_min = -0.1;   // truncated the pedestal which went from about -0.1 to 0.1
+double pedestal_max = 0.1;
+
+// fitting start points (obtained from a fit of gaussian in the range -0.1 to 0.1, set to contain just pedestal)
+double pedestal_amp = 4234;
+double pedestal_mean = 0.0128604;
+double pedestal_sigma = 0.0263469;
+
+double spe_firstgamma_mean = 0.33; // suitable fitting range, of... maybe pedestal_sigma to hiso max?
+// above does indeed control the position of the peak, although via a stretching factor from the left hand edge
+double spe_firstgamma_shape = 7.5; // suitable fitting range 1 to 100+?
+// controls how skewed to the left (low values) or symmetric (higher values) the peak is.
+// more symmetric (higher) values also narrow the distribution.
+// minimum of 1, almost a triangle vertical at the left edge, max >100, for nearly gaussian
+double spe_firstgamma_scaling = 40.; // without scaling peaks at about 10, so ~spe bump max / 10.
+
+// secondary gamma should be at LOWER mean and slightly WIDER shape: both scaling factors should be <1.
+double spe_secondgamma_mean_scaling = 0.3;
+double spe_secondgamma_shape_scaling = 0.6;
+double spe_secondgamma_scaling = spe_firstgamma_scaling/3.;  // about 1/3rd the height of the primary...?
+
+// SPE expl on a log-plot is a straight line dropping off from pedestal to fill the dip region
+double spe_expl_scaling = 10.;      // range 1-50? controls vertical shift
+double spe_expl_charge_scaling = 7; // range 3-30, controls the steepness of the expl
+// main scaling should be ~such that it intercepts the number of counts at the minium of the dip region
+// i.e. at the q of the dip then (exp_scaling*charge_scaling)exp(-dip*charge_scaling) = counts
+// so q_dip = 0.1, counts_dip = 200, with charge_scaling = 10, we have 10*exp_scaling*exp(-1)=200
+// or exp_scaling = 20/0.36 = 55. Back it off a bit to 40....
+// BUT actually, if this contributes too much, then its cutoff at the primary Gamma mean gives rise to a
+// noticable discontinuity, so back it off a lot to 10 or even 5
+// (the rest can be filled in by the secondary Gamma)
+
+// ok a set that seems to work roughly for fitting the whole SPE function is:
+double firstgamma_scaling = 50;
+double firstgamma_mean = 0.3;
+double firstgamma_shape = 10;
+double secondgamma_scaling = 14;  // 17 fits without the pedestal, but there'll be overlap
+double secondgamma_mean_scaling = 0.3;
+double secondgamma_shape_scaling = 0.6;
+double expl_scaling = 8;
+double expl_charge_scaling = 5;
