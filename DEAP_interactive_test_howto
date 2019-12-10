@@ -11,16 +11,33 @@
 // a convolution for viewing,
 // or a full fit function for viewing
 
-//TF1* pedfit = new TF1("pedfit","TMath::Gaus(x, [0], [1], true)",-0.2,0.5);
-//pedfit->SetParameters(0.012127,0.0253868);
-//TF1* spefunc = new TF1("spefunc",SPE_Func,-0.2,1.0,8);
-//spefunc->SetParameters(50,0.3,10,14,0.3,0.6,8,5);
-//TF1Convolution* conv = new TF1Convolution(pedfit,spefunc,-0.2,1.0,true);
-//conv->SetRange(-0.2,1.0);
-//TF1* convfunc = new TF1("convfunc",*conv,-0.2,1,conv->GetNpar());
-//for(int i=0; i<2; ++i){ convfunc->SetParameter(i,pedfit->GetParameter(i)); }
-//for(int i=2; i<convfunc->GetNpar(); ++i){ convfunc->SetParameter(i,spefunc->GetParameter(i-2)); }
-//convfunc->Draw("same");
+//maxpos1=-1, maxpos2=-1, interpos=-1;
+//max1=-1, max2=-1;
+//peaktovalleymin=5; // SPE peak must be 5+ counts > the minima, to ignore noise XXX tuneme
+//intermin=std::numeric_limits<int>::max();
+
+// n.b. this pedfit is the un-normalised one used for convolution with the SPE function
+TF1* pedfit = new TF1("pedfit","TMath::Gaus(x, [0], [1], true)",ped_range_min,ped_range_max);
+pedfit->SetParameters(pedestal_mean_guess,pedestal_sigma_guess);
+TF1* spefunc = new TF1("spefunc",SPE_Func,spe_range_min,spe_range_max,8);
+spefunc->SetParameters(spe_amp_guess,spe_mean_guess,10,0.3,0.3,0.6,exp_scaling,10);
+TF1Convolution* conv = new TF1Convolution(pedfit,spefunc,spe_range_min,spe_range_max,true);
+TF1* convfunc = new TF1("convfunc",*conv,spe_range_min,spe_range_max,conv->GetNpar());
+for(int i=0; i<2; ++i){ convfunc->SetParameter(i,pedfit->GetParameter(i)); }
+for(int i=2; i<convfunc->GetNpar(); ++i){ convfunc->SetParameter(i,spefunc->GetParameter(i-2)); }
+convfunc->Draw("same");
+convfunc->SetParName(0,"ped_mean");
+convfunc->SetParName(1,"ped_sigma");
+convfunc->SetParName(2,"spe_firstgamma_scaling");
+convfunc->SetParName(3,"spe_firstgamma_mean");
+convfunc->SetParName(4,"spe_firstgamma_shape");
+convfunc->SetParName(5,"spe_secondgamma_scaling");
+convfunc->SetParName(6,"spe_secondgamma_mean_scaling");
+convfunc->SetParName(7,"spe_secondgamma_shape_scaling");
+convfunc->SetParName(8,"spe_expl_scaling");
+convfunc->SetParName(9,"spe_expl_charge_scaling");
+for(int i=0; i<convfunc->GetNpar(); ++i){ std::cout<<convfunc->GetParameter(i)<<", "; }
+std::cout<<std::endl;
 
 TF1* full_fit_func = new TF1("full_fit_func",FullFitFunction,-0.2,1.0,14);
 // cannot call SetParameters with >11 parameters: must pass them via an array

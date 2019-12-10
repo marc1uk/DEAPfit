@@ -22,31 +22,36 @@ double Gamma(double* x, double* gamma_pars){
 }
 
 double SPE_Func(double* x, double* SPE_pars){
-  // the SPE function is a sum of a primary Gamma function for normal-path electrons
-  // plus a second Gamma function for electrons that miss the first dynode and hit the second
-  // plus an exponential that describes "scattering of the photoelectron on the dynode structure"
-  // The two gamma functions are linked, such that the mean and shape of the second Gamma
-  // is defined by a scaling factor multiplied by those of the first
-  double firstgamma_scaling = SPE_pars[0];
-  double firstgamma_mean = SPE_pars[1];
-  double firstgamma_shape = SPE_pars[2];
-  double secondgamma_scaling = SPE_pars[3];
-  double secondgamma_mean_scaling = SPE_pars[4];
-  double secondgamma_shape_scaling = SPE_pars[5];
-  double expl_scaling = SPE_pars[6];
-  double expl_charge_scaling = SPE_pars[7]; // XXX the parameter 'l' is not described in the paper....
-  
-  double secondgamma_pars[]{secondgamma_mean_scaling*firstgamma_mean,secondgamma_shape_scaling*firstgamma_shape};
-  
-  double returnval = 0;
-  returnval  = firstgamma_scaling*Gamma(x, &SPE_pars[1]);
-  returnval += secondgamma_scaling*Gamma(x, &secondgamma_pars[0]);
-  if( ((*x)<firstgamma_mean) && ((*x)>0) )
-       returnval += (expl_scaling*expl_charge_scaling)*exp(-(*x)*expl_charge_scaling);
-  // added a cutoff of the expl at 0; we need to be able to extend the SPE function out to
-  // somewhere that it should tail out to 0 for the convolution.
-  
-  return returnval;
+    //if((*x)<0) return 0; // safer, don't do anything weird...
+    // the SPE function is a sum of a primary Gamma function for normal-path electrons
+    // plus a second Gamma function for electrons that miss the first dynode and hit the second
+    // plus an exponential that describes "scattering of the photoelectron on the dynode structure"
+    // The two gamma functions are linked, such that the mean and shape of the second Gamma
+    // is defined by a scaling factor multiplied by those of the first
+    double firstgamma_scaling = SPE_pars[0];
+    double firstgamma_mean = SPE_pars[1];
+    double firstgamma_shape = SPE_pars[2];
+    double secondgamma_scaling = SPE_pars[3];
+    double secondgamma_mean_scaling = SPE_pars[4];
+    double secondgamma_shape_scaling = SPE_pars[5];
+    double expl_scaling = SPE_pars[6];
+    double expl_charge_scaling = SPE_pars[7];
+    
+    double secondgamma_pars[]{secondgamma_mean_scaling*firstgamma_mean,secondgamma_shape_scaling*firstgamma_shape};
+    
+    double returnval = 0;
+    returnval  = firstgamma_scaling*Gamma(x, &SPE_pars[1]);
+    returnval += secondgamma_scaling*firstgamma_scaling*Gamma(x, &secondgamma_pars[0]);
+    if( ((*x)<firstgamma_mean) && ((*x)>0) )
+        returnval += (expl_scaling*expl_charge_scaling)*exp(-(*x)*expl_charge_scaling);
+    // ^ this 'cutoff at the mean value of the primary SPE gamma' gives a discontinuity which is
+    // noticable if the expl function is too large of a component... use small parameters
+    // added a cutoff of the expl at 0; we need to be able to extend the SPE function out to
+    // somewhere that it should tail out to 0 for the convolution. Seems to tie up with paper.
+    // Note this still gives a discontinuity at the end of the function, which TF1Convolution
+    // says could be a problem, but it seems to be okay.
+    
+    return returnval;
 }
 
 double FullFitFunction(double* x, double* all_pars){

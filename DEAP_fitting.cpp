@@ -234,7 +234,14 @@ int main(int argc, const char* argv[]){
     full_fit_func->SetParName(13,"max_pes");
     
     // Loop over histos to fit
+    int offset= (argc<4) ? 0 : atoi(argv[3]);
+    int offsetcount=0;
     for(auto&& ahisto : histos_to_fit){
+        // skip until requested histo
+        if(offsetcount<offset){
+            ++offsetcount;
+            continue;
+        }
         // get next histogram
         c1->Clear();
         int detkey = ahisto.first;
@@ -261,17 +268,16 @@ int main(int argc, const char* argv[]){
         }
         
         // We must set the ranges of all functions, and for TF1Convolution, they MUST tend to 0 at their ends!
-        double histogram_minimum = thehist->GetXaxis()->GetXmin();
-        double histogram_maximum = thehist->GetXaxis()->GetXmax();
+        double histogram_minimum = thehist->GetXaxis()->GetXmin();  // this ISN'T ENOUGH
+        double histogram_maximum = thehist->GetXaxis()->GetXmax();  // convolutions will be CHOPPED
+        histogram_minimum = -histogram_maximum;
+        histogram_maximum *=2.;
         ped_range_min=histogram_minimum;  // lower range of the pedestal gaussian function
         ped_range_max=histogram_maximum;  // upper range of the pedestal gaussian function
         spe_range_min=histogram_minimum;  // lower range of the SPE function
         spe_range_max=histogram_maximum;  // upper range of the SPE function
         npe_func_min=histogram_minimum;   // each npe function could potentially have a different range
         npe_func_max=histogram_maximum;   // but i don't think reducing these has any benefit?
-        
-        // update the fit range
-        full_fit_func->SetRange(thehist->GetXaxis()->GetXmin(),thehist->GetXaxis()->GetXmax());
         
         // TODO derive this from occupancy
         double mean_pe_guess = 0.1;
@@ -308,6 +314,7 @@ int main(int argc, const char* argv[]){
         std::cout<<"Found valley at "<<interpos<<" with counts "<<intermin<<std::endl;
         std::cout<<"Found a SPE peak at "<<maxpos2<<" with counts "<<max2<<std::endl;
         bool spe_peak_found = ((max2>10)&&(maxpos2>0));
+        if(not spe_peak_found) continue; // just don't even try
         
         // normalise the histogram to unit area? or amplitude?
         double scaling = thehist->Integral();
@@ -316,7 +323,6 @@ int main(int argc, const char* argv[]){
         double max2scaled = max2 / scaling;               // used for estimating spe amplitude
         //double max1scaled = max1/scaling;               // unused
         //double interminscaled = intermin / scaling;     // unused
-        
         
         // clear the canvas
         c1->Clear();
@@ -351,6 +357,9 @@ int main(int argc, const char* argv[]){
         
         // Set the initial fit priors
         // ==========================
+        // update the fit range
+        full_fit_func->SetRange(thehist->GetXaxis()->GetXmin(),thehist->GetXaxis()->GetXmax());
+        
         std::cout<<"Setting parameter limits"<<std::endl;
         // we can't set more than 11 parameters inidividually, we need to build them into an array
         std::vector<double> fit_parameters(full_fit_func->GetNpar());
@@ -473,6 +482,11 @@ int main(int argc, const char* argv[]){
         */
         //std::this_thread::sleep_for(std::chrono::milliseconds(500));
         
+        // FIXME doesn't add the fit function...
+//        // write the histo to file, with prior fit function, for debug
+//        std::cout<<"Writing prior fit to file"<<std::endl;
+//        thehist->Write(TString::Format("%s_prior",thehist->GetName()));
+        
         // Try to do the fit
         std::cout<<"Fitting"<<std::endl;
         auto tstart = std::chrono::high_resolution_clock::now();
@@ -578,6 +592,7 @@ double Gamma(double* x, double* gamma_pars){
     double returnval = 1./(gamma_product*TMath::Gamma(gamma_shape));
     returnval *= pow(x_over_gamma_product,gamma_shape-1.);
     returnval *= exp(-x_over_gamma_product);
+    if(returnval<0) returnval=0;
     return returnval;
 }
 
@@ -625,11 +640,15 @@ double FullFitFunction(double* x, double* all_pars){
     // build the TF1 representing the pedestal component, if we have not yet done so
     if(not pedestal_func){
         std::cout<<"Creating Pedestal TF1"<<std::endl;
+        // TODO 'true' at end of TMath::Gaus adds 1/2*pi*sigma scaling to gaus, which matches paper function.
+        // however for small widths, this results in a VERY large pedestal amplitude....
+        // maybe we should set this to false (maximum=1) and let the firstgamma_scaling do the work...
         pedestal_func = new TF1("pedestal_func","TMath::Gaus(x, [0], [1], true)", ped_range_min, ped_range_max);
         pedestal_func->SetParName(0,"pedestal_mean");  // true adds normalization by 1/(sqrt(2pi)*sigma)
         pedestal_func->SetParName(1,"pedestal_width"); // matches DEAP paper
     }
     // update it's parameters
+    pedestal_func->SetRange(ped_range_min, ped_range_max);
     pedestal_func->SetParameters(ped_pars);
     
     // the contribution from pedestal alone has its own scaling
@@ -649,6 +668,7 @@ double FullFitFunction(double* x, double* all_pars){
         spe_func->SetParName(7,"spe_expl_charge_scaling");
     }
     // update it's parameters
+    spe_func->SetRange(spe_range_min,spe_range_max);
     spe_func->SetParameters(spe_pars);
     
     double running_npe_contribution=0;
@@ -663,7 +683,6 @@ double FullFitFunction(double* x, double* all_pars){
             // convolve it with the SPE function again
             std::cout<<"Creating NPE convolution "<<i<<std::endl;
             TF1Convolution* new_conv = new TF1Convolution(n_minus_one_func, spe_func, npe_func_min, npe_func_max, true);
-            new_conv->SetRange(npe_func_min, npe_func_max); // seems redundant...
             //new_conv->SetNofPointsFFT(1000);  // default, should be at least this
             npe_convolns.push_back(new_conv);
             // make the function from the convolution
@@ -674,7 +693,10 @@ double FullFitFunction(double* x, double* all_pars){
         }
         
         // retrieve the TF1 descrbing this NPE peak
+        TF1Convolution* this_npe_conv = npe_convolns.at(i);
         TF1* this_npe_func = npe_funcs.at(i);
+        this_npe_conv->SetRange(npe_func_min, npe_func_max);
+        this_npe_func->SetRange(npe_func_min, npe_func_max);
         
         // set it's parameters - the TF1Convolution of 2 functions (or the TF1 derived from it)
         // combines the parameters of both TF1s that went into it
