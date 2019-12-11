@@ -503,7 +503,7 @@ int main(int argc, const char* argv[]){
         auto tend = std::chrono::high_resolution_clock::now();
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(tend-tstart).count();
         time_taken *= 1e-9; // nano seconds to seconds
-        std::cout<<"Fitting took "<<std::fixed<<time_taken<<std::setprecision(9)<<" sec"<<std::endl;
+        std::cout<<"Fitting took "<<time_taken<<" sec"<<std::endl;
         std::cout<<"Fit returned: "<<fit_success<<std::endl;
         std::vector<double> fitted_parameters(full_fit_func->GetNpar());
         if(fit_success==0){
