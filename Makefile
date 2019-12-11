@@ -7,3 +7,7 @@ all: deapfit
 
 deapfit: ./DEAP_fitting.cpp
 	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./DEAP_fitting.cpp -o deapfit
+
+makeplots: ./make_plots.cpp
+        g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./make_plots.cpp -o makeplots
+

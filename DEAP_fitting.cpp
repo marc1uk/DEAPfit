@@ -43,7 +43,7 @@ std::vector<TF1*> npe_funcs;
 std::vector<TF1Convolution*> npe_convolns;  // used to obtain the TF1s
 double npe_func_min=-1;     // each npe function requires a range, but specifying many ranges seems overkill
 double npe_func_max=-1;     // they'll probably all need to have a range covering the full span of charges
-int max_pes=2;              // we can probably fix this?
+int max_pes=3;              // we can probably fix this?
 
 // fitting functions
 double Gamma(double* x, double* gamma_pars);
@@ -235,7 +235,9 @@ int main(int argc, const char* argv[]){
     full_fit_func->SetParName(13,"max_pes");
     
     // Loop over histos to fit
-    int offset= (argc<4) ? 0 : atoi(argv[3]);
+    int analysed_histo_count=0;
+    int histos_to_analyse = (argc<5) ? 0 : atoi(argv[4]);
+    int offset = (argc<4) ? 0 : atoi(argv[3]);
     int offsetcount=0;
     for(auto&& ahisto : histos_to_fit){
         // skip until requested histo
@@ -243,6 +245,8 @@ int main(int argc, const char* argv[]){
             ++offsetcount;
             continue;
         }
+        analysed_histo_count++;
+        if((analysed_histo_count>histos_to_analyse)&&(histos_to_analyse>0)) break;
         // get next histogram
         c1->Clear();
         int detkey = ahisto.first;
