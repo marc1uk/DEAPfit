@@ -30,6 +30,7 @@
 #include "TSystem.h"
 #include "TKey.h"
 #include "TTimer.h"
+#include "Math/MinimizerOptions.h"
 
 // fit globals
 TF1* pedestal_func=nullptr; // holds the shape of the pedestal, a TMath::Gaus
@@ -271,13 +272,16 @@ int main(int argc, const char* argv[]){
         double histogram_minimum = thehist->GetXaxis()->GetXmin();  // this ISN'T ENOUGH
         double histogram_maximum = thehist->GetXaxis()->GetXmax();  // convolutions will be CHOPPED
         histogram_minimum = -histogram_maximum;
-        histogram_maximum *=2.;
+        //histogram_maximum *=2.;
         ped_range_min=histogram_minimum;  // lower range of the pedestal gaussian function
         ped_range_max=histogram_maximum;  // upper range of the pedestal gaussian function
         spe_range_min=histogram_minimum;  // lower range of the SPE function
         spe_range_max=histogram_maximum;  // upper range of the SPE function
         npe_func_min=histogram_minimum;   // each npe function could potentially have a different range
         npe_func_max=histogram_maximum;   // but i don't think reducing these has any benefit?
+        
+        // Smooth the histogram. This seems to help the fit hit the broad SPE position better
+        thehist->Smooth(1.);
         
         // TODO derive this from occupancy
         double mean_pe_guess = 0.1;
@@ -486,6 +490,11 @@ int main(int argc, const char* argv[]){
 //        // write the histo to file, with prior fit function, for debug
 //        std::cout<<"Writing prior fit to file"<<std::endl;
 //        thehist->Write(TString::Format("%s_prior",thehist->GetName()));
+        
+        // We may be able to speed up fitting by reducing tolerances or changing out integration strategy
+        // from https://root-forum.cern.ch/t/speeding-up-fitting-to-a-landau-distribution/25140/2
+        //ROOT::Math::MinimizerOptions::SetDefaultStrategy(0);
+        //ROOT::Math::MinimizerOptions::SetDefaultTolerance(10);
         
         // Try to do the fit
         std::cout<<"Fitting"<<std::endl;
