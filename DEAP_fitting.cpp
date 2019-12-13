@@ -284,8 +284,8 @@ int main(int argc, const char* argv[]){
         
         // Scan for a second peak after pedestal
         std::vector<double> precheck_pars;
-		bool found_spe_peak = deapfitter.PeakScan(&precheck_pars);
-		if(not found_spe_peak) continue; // sorry, if we can't find a second bump, i can't generate suitable priors
+        bool found_spe_peak = deapfitter.PeakScan(&precheck_pars);
+        if(not found_spe_peak) continue; // sorry, if we can't find a second bump, i can't generate suitable priors
         
         //only scale the axes AFTER calling PeakScan FIXME
         double xscaling = 1;

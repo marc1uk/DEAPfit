@@ -9,7 +9,7 @@ DEAPFitFunction::DEAPFitFunction(int max_pes_in){
 DEAPFitFunction::~DEAPFitFunction(){
 	if(NPE_pars) delete[] NPE_pars;
 	for(TF1* afunc : npe_funcs) delete afunc;
-	for(TF1Convolution* aconv : npe_convolns) delete aconv; // can i assume TF1Convolutions do not own their TF1s?
+	for(TF1Convolution* aconv : npe_convolns) delete aconv; // I assume TF1Convolutions don't own their TF1s?
 }
 
 void DEAPFitFunction::SetPedestalRange(double min, double max){
@@ -84,7 +84,8 @@ void DEAPFitFunction::SetHisto(TH1* histo){
 	}
 	thehist = histo;
 	if(thehist->GetListOfFunctions()->GetSize()>0){
-		std::cerr<<"WARNING: DEAPFitFunction::SetHisto clearing functions owned by input histogram!"<<std::endl;
+		std::cerr<<"WARNING: DEAPFitFunction::SetHisto clears any functions "
+			 <<"owned by input histogram!"<<std::endl;
 		thehist->GetListOfFunctions()->Clear();
 	}
 }
@@ -118,7 +119,7 @@ bool DEAPFitFunction::PeakScan(std::vector<double>* precheck_pars){
 	// some very crude carry-over stuff from the triple-gaussian fit used for the PMT test stand.
 	// designed to identify a few salient points in the distribution, for prior calculations
 	// Try to find a second distinct peak after the pedestal
-
+	
 	maxpos1=-1, maxpos2=-1, interpos=-1;
 	max1=-1, max2=-1;
 	intermin=std::numeric_limits<int>::max();
@@ -126,7 +127,7 @@ bool DEAPFitFunction::PeakScan(std::vector<double>* precheck_pars){
 	// ========================================================================
 	// STEP 1: SCAN OVER HISTOGRAM AND TRY TO FIND A SECOND PEAK AFTER PEDESTAL
 	// ========================================================================
-
+	
 	// scan over X-axis
 	for(int bini=1; bini<thehist->GetNbinsX(); bini++){
 		// get bin content
@@ -176,7 +177,8 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		std::cerr<<"ERROR: Sorry, current generation of suitable priors relies on successful finding of "
 			 <<" a second bump in the charge distribution. Please run PeakScan first, if you haven't."
 			 <<"If you have, no suitable bump was found."<<std::endl
-			 <<"To proceed, you'll need to generate your own priors and pass them via DEAPFitFunction::SetParameters."
+			 <<"To proceed, you'll need to generate your own priors "
+			 <<"and pass them via DEAPFitFunction::SetParameters."
 			 <<std::endl;
 	}
 	
@@ -222,10 +224,10 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// the SPE consists of two 'Gaus' functions and an exponential
 	
 	// first gamma parameters
-	spe_firstgamma_scaling = spe_amp_guess;           // controls amplitude of main SPE function bump,
+	spe_firstgamma_scaling = spe_amp_guess;       // controls amplitude of main SPE function bump,
 	// although indirectly since we have two contributing gauss functions whose amplitudes are linked to this
-	spe_firstgamma_mean = spe_mean_guess;             // controls position of peak via a stretching from the LH edge
-	spe_firstgamma_shape = 10;                        // an arbitrary shape factor. (1/b in the paper)
+	spe_firstgamma_mean = spe_mean_guess;         // controls posn of peak via a stretching from the LH edge
+	spe_firstgamma_shape = 10;                    // an arbitrary shape factor. (1/b in the paper)
 	// controls how skewed to the left (low values) or symmetric (higher values) the peak is.
 	// more symmetric (higher) values also narrow the distribution.
 	// minimum of 1, almost a triangle vertical at the left edge, max >100, for nearly gaussian
@@ -233,19 +235,20 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// secondary gamma parameters
 	// second gamma's parameters are scaling factors to those of the first
 	// secondary gamma should be at LOWER mean and slightly WIDER shape: both scaling factors should be <1.
-	spe_secondgamma_scaling = 0.3;                    // amplitude scaling of secondary Gamma
-	spe_secondgamma_mean_scaling = 0.3;               // mean scaling. seemed to work...
-	spe_secondgamma_shape_scaling = 0.6;              // shape scaling. seemed to work...
+	spe_secondgamma_scaling = 0.3;                // amplitude scaling of secondary Gamma
+	spe_secondgamma_mean_scaling = 0.3;           // mean scaling. seemed to work...
+	spe_secondgamma_shape_scaling = 0.6;          // shape scaling. seemed to work...
 	
 	// exponential parameters
 	// SPE expl on a log-plot is a straight line dropping off from pedestal to fill the dip region
 	// at most this should not exceed the dip where it fills in
-	spe_expl_charge_scaling = 10;                     // expl charge scaling: defines steepness of the expl fill-in
+	spe_expl_charge_scaling = 10;                 // defines steepness of expl fill-in
 	// expl amplitude scaling defines a vertical shift of the expl fill-in
 	// zero would probably be a fair prior... but let's try to get something if we have a dip?
 	if(spe_peak_found){
 		double dip_charge  = thehist->GetBinCenter(interpos);
-		double exp_scaling = (1./spe_expl_charge_scaling)*exp(-dip_charge*spe_expl_charge_scaling); // ~ dip counts
+		// estimate dip counts
+		double exp_scaling = (1./spe_expl_charge_scaling)*exp(-dip_charge*spe_expl_charge_scaling);
 		exp_scaling /= 10;  // back it off
 		spe_expl_scaling = exp_scaling;
 	} else {
@@ -286,25 +289,25 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// pedestal mean
 	fit_parameter_ranges.at(2) = std::pair<double,double>{0,spe_mean_guess};
 	// pedestal sigma
-	fit_parameter_ranges.at(3) = std::pair<double,double>{0.,spe_mean_guess}; // TODO check this isn't too restrictive
+	fit_parameter_ranges.at(3) = std::pair<double,double>{0.,spe_mean_guess}; // TODO check not too restrictive
 	// spe first gamma amplitude
-	fit_parameter_ranges.at(4) = std::pair<double,double>{0,max_bin_count};      // TODO check this isn't too restrictive
+	fit_parameter_ranges.at(4) = std::pair<double,double>{0,max_bin_count};   // TODO check not too restrictive
 	// spe first gamma mean
-	fit_parameter_ranges.at(5) = std::pair<double,double>{0,spe_range_max};      // TODO check this isn't too restrictive
+	fit_parameter_ranges.at(5) = std::pair<double,double>{0,spe_range_max};   // TODO check not too restrictive
 	// spe first gamma shape
 	fit_parameter_ranges.at(6) = std::pair<double,double>{1.,100};
 	// spe second gamma amplitude scaling
-	fit_parameter_ranges.at(7) = std::pair<double,double>{0,0.75};          // amp↑ as q↓, so even scaling 1 is too high
+	fit_parameter_ranges.at(7) = std::pair<double,double>{0,0.75}; // amp↑ as q↓, so even scaling 1 is too high
 	// spe second gamma mean scaling
-	fit_parameter_ranges.at(8) = std::pair<double,double>{0.1,1};           // secondary gamma should be lower charge
+	fit_parameter_ranges.at(8) = std::pair<double,double>{0.1,1};  // secondary gamma should be lower charge
 	// spe second gamma shape scaling
-	fit_parameter_ranges.at(9) = std::pair<double,double>{0.1,2};           // secondary gammma *should* be wider
+	fit_parameter_ranges.at(9) = std::pair<double,double>{0.1,2};  // secondary gammma *should* be wider
 	// spe expl amplitude
 	fit_parameter_ranges.at(10) = std::pair<double,double>{0,max_bin_count};
 	// spe expl charge scaling
 	fit_parameter_ranges.at(11) = std::pair<double,double>{3,50};
 	// mean npe
-	fit_parameter_ranges.at(12) = std::pair<double,double>{0,0.5};          // >1 we're not in SPE regime any more!
+	fit_parameter_ranges.at(12) = std::pair<double,double>{0,0.5};  // >1 isn't SPE regime any more!
 	// max npes
 	fit_parameter_ranges.at(13) = std::pair<double,double>{1,5};
 	
@@ -339,11 +342,12 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 
 TF1* DEAPFitFunction::MakeFullFitFunction(){
 	if(full_fit_func!=nullptr){
-		std::cerr<<"WARNING: You CANNOT create multiple TF1s from a single DEAPFitFunction object!"<<std::endl
+		std::cerr<<"WARNING: You CANNOT create multiple TF1s "
+			 <<"from a single DEAPFitFunction object!"<<std::endl
 			 <<"Returning existing fit function."<<std::endl;
 	} else {
 		ConstructFunctions(); // construct the TF1s that will go into it
-		full_fit_func = new TF1("full_fit_func",this,&DEAPFitFunction::FullFitFunction,histogram_minimum,histogram_maximum,14);
+		full_fit_func = new TF1("full_fit_func", this, &DEAPFitFunction::FullFitFunction, histogram_minimum, histogram_maximum, 14);
 		NameParameters(full_fit_func);
 		full_fit_func->FixParameter(13, max_pes);    // fix max_pes
 	}
@@ -514,7 +518,8 @@ void DEAPFitFunction::FixMaxNpe(const double &max_pes_in){
 
 void DEAPFitFunction::FixingWarning(){
 	std::cerr<<"WARNING: DEAPFitFunction::FixParameter called, but we have no internal TF1 object"<<std::endl
-		 <<"If you constructed your TF1 using this class as a functor, use TF1::FixParameter instead"<<std::endl;
+		 <<"If you constructed your TF1 using this class as a functor, "
+		 <<"use TF1::FixParameter instead"<<std::endl;
 }
 
 // Group Fit Parameter Setters
@@ -571,7 +576,8 @@ void DEAPFitFunction::SetParameters(double* fit_parameters){
 
 int DEAPFitFunction::SetParameterLimits(std::vector<std::pair<double,double>> ranges_in){
 	if(ranges_in.size()<13){
-		std::cerr<<"WARNING: Too few parameter ranges passed to DEAPFitFunction::SetParameterLimits!"<<std::endl
+		std::cerr<<"WARNING: Too few parameter ranges passed to "
+			 <<"DEAPFitFunction::SetParameterLimits!"<<std::endl
 			 <<"Expected 13 (14 including max_npes), got "<<ranges_in.size()<<std::endl
 			 <<"NO PARAMETERS WILL BE SET"<<std::endl;
 		return 0;
@@ -705,7 +711,7 @@ void DEAPFitFunction::ConstructFunctions(){
 	// build the TF1 representing the pedestal component, if we have not yet done so
 	if(not pedestal_func){
 		std::cout<<"Creating Pedestal TF1"<<std::endl;
-		// TODO 'true' at end of TMath::Gaus adds 1/2*pi*sigma scaling to gaus, which matches paper function.
+		// TODO 'true' arg to TMath::Gaus adds 1/2*pi*sigma scaling to gaus, which matches paper function.
 		// however for small widths, this results in a VERY large pedestal amplitude....
 		// maybe we should set this to false (maximum=1) and let the firstgamma_scaling do the work...
 		pedestal_func = new TF1("pedestal_func","TMath::Gaus(x, [0], [1], true)", ped_range_min, ped_range_max);
@@ -731,7 +737,8 @@ void DEAPFitFunction::ConstructFunctions(){
 	for(int i=0; i<max_pes; ++i){
 		// if we do not have a TF1 corresponding to this NPE peak - build it
 		if(npe_funcs.size()<(i+1)){
-			// each Npe peak is a convolution of the pedestal, together with the SPE peak convolved with itself N times
+			// each Npe peak is a convolution of the pedestal, 
+			// together with the SPE peak convolved with itself N times
 			// we re-use the results of previous convolutions to build on for the next
 			TF1* n_minus_one_func = (i==0) ? pedestal_func : npe_funcs.at(i-1);
 			// convolve it with the SPE function again
