@@ -32,11 +32,14 @@
 #include "TTimer.h"
 #include "Math/MinimizerOptions.h"
 
+// should we store additional debug info in the output TTree
+int STORE_PRIORS=1;
+
 // fit globals
 TF1* pedestal_func=nullptr; // holds the shape of the pedestal, a TMath::Gaus
 double ped_range_min=-1;    // lower range of the pedestal gaussian function
 double ped_range_max=-1;    // upper range of the pedestal gaussian function
-TF1* spe_func=nullptr;      // holds the shape of the SPE peak, 
+TF1* spe_func=nullptr;      // holds the shape of the SPE peak,
 double spe_range_min=-1;    // lower range of the SPE function
 double spe_range_max=-1;    // upper range of the SPE function
 std::vector<TF1*> npe_funcs;
@@ -209,6 +212,82 @@ int main(int argc, const char* argv[]){
     TBranch* bspe_expl_charge_scaling = outtree->Branch("spe_expl_charge_scaling", &file_spe_expl_charge_scaling);
     TBranch* bmean_npe = outtree->Branch("mean_npe", &file_mean_npe);
     TBranch* bmax_pes = outtree->Branch("max_pes", &file_max_pes);
+    // also store all our priors for debug
+    double file_prescaling_prior;
+    double file_ped_scaling_prior;
+    double file_ped_mean_prior;
+    double file_ped_sigma_prior;
+    double file_spe_firstgamma_scaling_prior;
+    double file_spe_firstgamma_mean_prior;
+    double file_spe_firstgamma_shape_prior;
+    double file_spe_secondgamma_scaling_prior;
+    double file_spe_secondgamma_mean_scaling_prior;
+    double file_spe_secondgamma_shape_scaling_prior;
+    double file_spe_expl_scaling_prior;
+    double file_spe_expl_charge_scaling_prior;
+    double file_mean_npe_prior;
+    double file_max_pes_prior;
+    // internal parameters involved in deriving the fit priors
+    double file_ped_range_min;
+    double file_ped_range_max;
+    double file_spe_range_min;
+    double file_spe_range_max;
+    double file_npe_func_min;
+    double file_npe_func_max;
+    double file_mean_pe_guess;
+    int file_maxpos1;
+    int file_max1;
+    int file_peaktovalleymin;
+    int file_intermin;
+    bool file_spe_peak_found;
+    double file_scaling;
+    double file_max2scaled;
+    double file_pedestal_mean_guess;
+    double file_max_bin_count;
+    double file_pedestal_amp_guess;
+    double file_spe_amp_guess;
+    double file_pedestal_sigma_guess;
+    double file_spe_mean_guess;
+    double file_spe_sigma_guess;
+    
+    if(STORE_PRIORS){
+        TBranch* bprescaling = outtree->Branch("prescaling", &file_prescaling_prior);
+        TBranch* bped_scaling = outtree->Branch("ped_scaling", &file_ped_scaling_prior);
+        TBranch* bped_mean = outtree->Branch("ped_mean", &file_ped_mean_prior);
+        TBranch* bped_sigma = outtree->Branch("ped_sigma", &file_ped_sigma_prior);
+        TBranch* bspe_firstgamma_scaling = outtree->Branch("spe_firstgamma_scaling", &file_spe_firstgamma_scaling_prior);
+        TBranch* bspe_firstgamma_mean = outtree->Branch("spe_firstgamma_mean", &file_spe_firstgamma_mean_prior);
+        TBranch* bspe_firstgamma_shape = outtree->Branch("spe_firstgamma_shape", &file_spe_firstgamma_shape_prior);
+        TBranch* bspe_secondgamma_scaling = outtree->Branch("spe_secondgamma_scaling", &file_spe_secondgamma_scaling_prior);
+        TBranch* bspe_secondgamma_mean_scaling = outtree->Branch("spe_secondgamma_mean_scaling", &file_spe_secondgamma_mean_scaling_prior);
+        TBranch* bspe_secondgamma_shape_scaling = outtree->Branch("spe_secondgamma_shape_scaling", &file_spe_secondgamma_shape_scaling_prior);
+        TBranch* bspe_expl_scaling = outtree->Branch("spe_expl_scaling", &file_spe_expl_scaling_prior);
+        TBranch* bspe_expl_charge_scaling = outtree->Branch("spe_expl_charge_scaling", &file_spe_expl_charge_scaling_prior);
+        TBranch* bmean_npe = outtree->Branch("mean_npe", &file_mean_npe_prior);
+        TBranch* bmax_pes = outtree->Branch("max_pes", &file_max_pes_prior);
+        // also store some of the parameters used in determining priors, as this is useful
+        TBranch* bped_range_min = outtree->Branch("ped_range_min", &file_ped_range_min);
+        TBranch* bped_range_max = outtree->Branch("ped_range_max", &file_ped_range_max);
+        TBranch* bspe_range_min = outtree->Branch("spe_range_min", &file_spe_range_min);
+        TBranch* bspe_range_max = outtree->Branch("spe_range_max", &file_spe_range_max);
+        TBranch* bnpe_func_min = outtree->Branch("npe_func_min", &file_npe_func_min);
+        TBranch* bnpe_func_max = outtree->Branch("npe_func_max", &file_npe_func_max);
+        TBranch* bmean_pe_guess = outtree->Branch("mean_pe_guess", &file_mean_pe_guess);
+        TBranch* bmaxpos1 = outtree->Branch("maxpos1", &file_maxpos1);
+        TBranch* bmax1 = outtree->Branch("max1", &file_max1);
+        TBranch* bpeaktovalleymin = outtree->Branch("peaktovalleymin", &file_peaktovalleymin);
+        TBranch* bintermin = outtree->Branch("intermin", &file_intermin);
+        TBranch* bspe_peak_found = outtree->Branch("spe_peak_found", &file_spe_peak_found);
+        TBranch* bscaling = outtree->Branch("scaling", &file_scaling);
+        TBranch* bmax2scaled = outtree->Branch("max2scaled", &file_max2scaled);
+        TBranch* bpedestal_mean_guess = outtree->Branch("pedestal_mean_guess", &file_pedestal_mean_guess);
+        TBranch* bmax_bin_count = outtree->Branch("max_bin_count", &file_max_bin_count);
+        TBranch* bpedestal_amp_guess = outtree->Branch("pedestal_amp_guess", &file_pedestal_amp_guess);
+        TBranch* bspe_amp_guess = outtree->Branch("spe_amp_guess", &file_spe_amp_guess);
+        TBranch* bpedestal_sigma_guess = outtree->Branch("pedestal_sigma_guess", &file_pedestal_sigma_guess);
+        TBranch* bspe_mean_guess = outtree->Branch("spe_mean_guess", &file_spe_mean_guess);
+        TBranch* bspe_sigma_guess = outtree->Branch("spe_sigma_guess", &file_spe_sigma_guess);
+    }
     // OK, file made
     
     // =========================================
@@ -463,6 +542,43 @@ int main(int argc, const char* argv[]){
         }
         std::cout<<std::endl;
         
+        // pass to the file for debugging
+        file_prescaling_prior = fit_parameters.at(0);
+        file_ped_scaling_prior = fit_parameters.at(1);
+        file_ped_mean_prior = fit_parameters.at(1);
+        file_ped_sigma_prior = fit_parameters.at(2);
+        file_spe_firstgamma_scaling_prior = fit_parameters.at(3);
+        file_spe_firstgamma_mean_prior = fit_parameters.at(4);
+        file_spe_firstgamma_shape_prior = fit_parameters.at(5);
+        file_spe_secondgamma_scaling_prior = fit_parameters.at(6);
+        file_spe_secondgamma_mean_scaling_prior = fit_parameters.at(7);
+        file_spe_secondgamma_shape_scaling_prior = fit_parameters.at(8);
+        file_spe_expl_scaling_prior = fit_parameters.at(9);
+        file_spe_expl_charge_scaling_prior = fit_parameters.at(10);
+        file_mean_npe_prior = fit_parameters.at(11);
+        file_max_pes_prior = fit_parameters.at(12);
+        // note the parameters used in deriving the priors
+        file_ped_range_min = ped_range_min;
+        file_ped_range_max = ped_range_max;
+        file_spe_range_min = spe_range_min;
+        file_spe_range_max = spe_range_max;
+        file_npe_func_min = npe_func_min;
+        file_npe_func_max = npe_func_max;
+        file_mean_pe_guess = mean_pe_guess;
+        file_maxpos1 = maxpos1;
+        file_max1 = max1;
+        file_peaktovalleymin = peaktovalleymin;
+        file_intermin = intermin;
+        file_spe_peak_found = spe_peak_found;
+        file_scaling = scaling;
+        file_max2scaled = max2scaled;
+        file_pedestal_mean_guess = pedestal_mean_guess;
+        file_max_bin_count = max_bin_count;
+        file_pedestal_amp_guess = pedestal_amp_guess;
+        file_spe_amp_guess = spe_amp_guess;
+        file_pedestal_sigma_guess = pedestal_sigma_guess;
+        file_spe_mean_guess = spe_mean_guess;
+        file_spe_sigma_guess = spe_sigma_guess;
         // draw, to see our prior
         std::cout<<"Drawing prior"<<std::endl;
         full_fit_func->Draw("same");
@@ -508,18 +624,15 @@ int main(int argc, const char* argv[]){
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(tend-tstart).count();
         time_taken *= 1e-9; // nano seconds to seconds
         std::cout<<"Fitting took "<<time_taken<<" sec"<<std::endl;
-        std::cout<<"Fit returned: "<<fit_success<<std::endl;
+        std::cout<<"Fit returned: "<<fit_success<<" for histogram "<<thehist->GetName()<<std::endl;
         std::vector<double> fitted_parameters(full_fit_func->GetNpar());
-        if(fit_success==0){
-            std::cout<<"Fit success on histogram "<<thehist->GetName()<<std::endl;
-            std::cout<<"Fit parameters were: {";
-            for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
-                std::cout<<full_fit_func->GetParameter(pari);
-                if((pari+1)<full_fit_func->GetNpar()) std::cout<<", ";
-                fitted_parameters.push_back(full_fit_func->GetParameter(pari));
-            }
-            std::cout<<"}"<<std::endl;
+        std::cout<<"Fit parameters were: {";
+        for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
+            std::cout<<full_fit_func->GetParameter(pari);
+            if((pari+1)<full_fit_func->GetNpar()) std::cout<<", ";
+            fitted_parameters.push_back(full_fit_func->GetParameter(pari));
         }
+        std::cout<<"}"<<std::endl;
         
         // mark the canvas as modified by the fit
         std::cout<<"Updating canvas with fit"<<std::endl;
