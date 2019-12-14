@@ -349,6 +349,8 @@ int main(int argc, const char* argv[]){
         c1->Clear();
         c1->cd();
         thehist->Draw();
+        thehist->ResetBit(kCanDelete);  // ROOT, plz... stop deleting my stuff
+        thehist->SetDirectory(0);
         deapfitter.GetFullFitFunction()->Draw("same");
         gPad->SetLogy();
         c1->Modified();

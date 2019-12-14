@@ -7,9 +7,9 @@ DEAPFitFunction::DEAPFitFunction(int max_pes_in){
 }
 
 DEAPFitFunction::~DEAPFitFunction(){
-	if(NPE_pars) delete[] NPE_pars;
 	for(TF1* afunc : npe_funcs) delete afunc;
-	for(TF1Convolution* aconv : npe_convolns) delete aconv; // I assume TF1Convolutions don't own their TF1s?
+	for(TF1Convolution* aconv : npe_convolns) delete aconv;
+	if(full_fit_func) delete full_fit_func;
 }
 
 void DEAPFitFunction::SetPedestalRange(double min, double max){
@@ -38,16 +38,23 @@ void DEAPFitFunction::SetSpeRange(double min, double max){
 }
 void DEAPFitFunction::SetNpeRange(double min, double max){
 	// if no values passed (default) pull ranges from histogram
+	double min_func=0;
+	double min_conv=0;  // XXX FIXME the convolution range should probably be less than the input func ranges
 	if((min==0)&&(max==0)){
 		int rangesok = LoadRanges();
 		if(not rangesok) return;
-		min = -histogram_maximum;
+		min_conv = histogram_minimum;
+		min_func = -histogram_maximum;
+		min = min_func;
 		max =  histogram_maximum;
+	} else {
+		min_func = min;
+		min_conv = min;
 	}
-	npe_func_min = min;
+	npe_func_min = min;  // XXX we don't have enough parameters... i don't know how this works...
 	npe_func_max = max;
-	for(TF1Convolution* aconv : npe_convolns) aconv->SetRange(npe_func_min,npe_func_max);
-	for(TF1* afunc : npe_funcs) afunc->SetRange(npe_func_min,npe_func_max);
+	for(TF1Convolution* aconv : npe_convolns) aconv->SetRange(min_conv,npe_func_max);
+	for(TF1* afunc : npe_funcs) afunc->SetRange(min_func,npe_func_max);
 }
 std::pair<double,double> DEAPFitFunction::SetRanges(double min, double max){
 	// if no values passed (default) pull ranges from histogram
@@ -88,20 +95,22 @@ void DEAPFitFunction::SetHisto(TH1* histo){
 			 <<"owned by input histogram!"<<std::endl;
 		thehist->GetListOfFunctions()->Clear();
 	}
+	SetRanges();
 }
 
 TH1* DEAPFitFunction::ScaleHistoXrange(double inscaling){
 	thehist->GetXaxis()->Set(thehist->GetNbinsX(),
 				 thehist->GetXaxis()->GetXmin()*inscaling,
 				 thehist->GetXaxis()->GetXmax()*inscaling);
+	SetRanges();
 	return thehist;
 }
 TH1* DEAPFitFunction::ScaleHistoYrange(double inscaling){
 	if(inscaling==0){
 		// by default scale to unit area
-		inscaling = thehist->Integral();
+		//inscaling = thehist->Integral();
 		// we could also consider unit peak?
-		//inscaling = thehist->GetBinContent(thehist->GetMaximumBin());
+		inscaling = thehist->GetBinContent(thehist->GetMaximumBin());
 	}
 	// keep track of it for calculating priors
 	yscaling = inscaling;
@@ -186,7 +195,7 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// STEP 2: HEURISTICS (guessing)
 	// ========================================================================
 	double max_bin_count = thehist->GetBinContent(thehist->GetMaximumBin());
-	double pedestal_amp_guess = max_bin_count/100.;  // TODO do better?
+	double pedestal_amp_guess = max_bin_count;
 	// if we found an SPE peak use its location, otherwise take for prior just a bit above mean
 	// also use its location to estimate pedestal width and SPE amplitude
 	double spe_mean_guess;
@@ -194,10 +203,10 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	double pedestal_sigma_guess;
 	if(spe_peak_found){
 		spe_amp_guess = max2 / yscaling;
-		spe_mean_guess = thehist->GetBinCenter(maxpos2);
+		spe_mean_guess = thehist->GetBinCenter(maxpos2)*1.1;
 		pedestal_sigma_guess = thehist->GetBinCenter(interpos)/10.;  // overwrite
 	} else {
-		spe_amp_guess = pedestal_amp_guess/5;
+		spe_amp_guess = pedestal_amp_guess;
 		spe_mean_guess = thehist->GetMean()*1.5;
 		pedestal_sigma_guess = 0.1; // based on being in pC ... TODO find a better way
 	}
@@ -208,7 +217,7 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	
 	// general parameters
 	// ------------------
-	prescaling = 5.;           // overall scaling of the entire function TODO tune from histogram?
+	prescaling = 0.1;           // overall scaling of the entire function TODO tune from histogram?
 	// TODO this seems redundant given that we also have scaling for the individual components;
 	// try removing/fixing this parameter to speed up fitting
 	mean_npe = 0.1;            // TODO use occupancy: # of flashes with a hit over total # flashes
@@ -236,8 +245,8 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// second gamma's parameters are scaling factors to those of the first
 	// secondary gamma should be at LOWER mean and slightly WIDER shape: both scaling factors should be <1.
 	spe_secondgamma_scaling = 0.3;                // amplitude scaling of secondary Gamma
-	spe_secondgamma_mean_scaling = 0.3;           // mean scaling. seemed to work...
-	spe_secondgamma_shape_scaling = 0.6;          // shape scaling. seemed to work...
+	spe_secondgamma_mean_scaling = 0.3;           // mean scaling. Don't confuse with NPE peak separation!
+	spe_secondgamma_shape_scaling = 0.3;          // shape scaling. lower is wider
 	
 	// exponential parameters
 	// SPE expl on a log-plot is a straight line dropping off from pedestal to fill the dip region
@@ -307,7 +316,7 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// spe expl charge scaling
 	fit_parameter_ranges.at(11) = std::pair<double,double>{3,50};
 	// mean npe
-	fit_parameter_ranges.at(12) = std::pair<double,double>{0,0.5};  // >1 isn't SPE regime any more!
+	fit_parameter_ranges.at(12) = std::pair<double,double>{0,3.0};  // >1 isn't SPE regime any more!
 	// max npes
 	fit_parameter_ranges.at(13) = std::pair<double,double>{1,5};
 	
@@ -331,6 +340,8 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		}
 		std::cout<<std::endl;
 	}
+	// update the internal TF1s
+	RefreshParameters();
 	
 	// update the user's vector
 	if(fit_pars!=nullptr) *fit_pars = fit_parameters;
@@ -366,23 +377,23 @@ TF1* DEAPFitFunction::NameParameters(TF1* thefunc){
 			thefunc=full_fit_func;
 		}
 	}
-	full_fit_func->SetNpx(2000); // good resolution on our draws
+	thefunc->SetNpx(2000); // good resolution on our draws
 	// it takes a *lot* of parameters...
-	full_fit_func->SetParName(0,"prescaling");
-	full_fit_func->SetParName(1,"ped_scaling");
-	full_fit_func->SetParName(2,"ped_mean");
-	full_fit_func->SetParName(3,"ped_sigma");
-	full_fit_func->SetParName(4,"spe_firstgamma_scaling");
-	full_fit_func->SetParName(5,"spe_firstgamma_mean");
-	full_fit_func->SetParName(6,"spe_firstgamma_shape");
-	full_fit_func->SetParName(7,"spe_secondgamma_scaling");
-	full_fit_func->SetParName(8,"spe_secondgamma_mean_scaling");
-	full_fit_func->SetParName(9,"spe_secondgamma_shape_scaling");
-	full_fit_func->SetParName(10,"spe_expl_scaling");
-	full_fit_func->SetParName(11,"spe_expl_charge_scaling");
-	full_fit_func->SetParName(12,"mean_npe");
-	full_fit_func->SetParName(13,"max_pes");
-	return full_fit_func;
+	thefunc->SetParName(0,"prescaling");
+	thefunc->SetParName(1,"ped_scaling");
+	thefunc->SetParName(2,"ped_mean");
+	thefunc->SetParName(3,"ped_sigma");
+	thefunc->SetParName(4,"spe_firstgamma_scaling");
+	thefunc->SetParName(5,"spe_firstgamma_mean");
+	thefunc->SetParName(6,"spe_firstgamma_shape");
+	thefunc->SetParName(7,"spe_secondgamma_scaling");
+	thefunc->SetParName(8,"spe_secondgamma_mean_scaling");
+	thefunc->SetParName(9,"spe_secondgamma_shape_scaling");
+	thefunc->SetParName(10,"spe_expl_scaling");
+	thefunc->SetParName(11,"spe_expl_charge_scaling");
+	thefunc->SetParName(12,"mean_npe");
+	if(thefunc->GetNpar()>13) thefunc->SetParName(13,"max_pes");
+	return thefunc;
 }
 
 // Parameter Setters
@@ -550,6 +561,7 @@ int DEAPFitFunction::SetParameters(std::vector<double> fit_parameters){
 			 <<"Only parameters up to the first 13 (14) will be used"<<std::endl;
 	}
 	if(full_fit_func!=nullptr) full_fit_func->SetParameters(fit_parameters.data());
+	RefreshParameters();
 	return 1;
 }
 void DEAPFitFunction::SetParameters(double* fit_parameters){
@@ -557,21 +569,22 @@ void DEAPFitFunction::SetParameters(double* fit_parameters){
 	// set members
 	prescaling = fit_parameters[0];
 	ped_scaling = fit_parameters[1];
-	ped_mean = fit_parameters[1];
-	ped_sigma = fit_parameters[2];
-	spe_firstgamma_scaling = fit_parameters[3];
-	spe_firstgamma_mean = fit_parameters[4];
-	spe_firstgamma_shape = fit_parameters[5];
-	spe_secondgamma_scaling = fit_parameters[6];
-	spe_secondgamma_mean_scaling = fit_parameters[7];
-	spe_secondgamma_shape_scaling = fit_parameters[8];
-	spe_expl_scaling = fit_parameters[9];
-	spe_expl_charge_scaling = fit_parameters[10];
-	mean_npe = fit_parameters[11];
-	//max_pes = fit_parameters[12];  // better to assume we're not using it, since we can't tell
+	ped_mean = fit_parameters[2];
+	ped_sigma = fit_parameters[3];
+	spe_firstgamma_scaling = fit_parameters[4];
+	spe_firstgamma_mean = fit_parameters[5];
+	spe_firstgamma_shape = fit_parameters[6];
+	spe_secondgamma_scaling = fit_parameters[7];
+	spe_secondgamma_mean_scaling = fit_parameters[8];
+	spe_secondgamma_shape_scaling = fit_parameters[9];
+	spe_expl_scaling = fit_parameters[10];
+	spe_expl_charge_scaling = fit_parameters[11];
+	mean_npe = fit_parameters[12];
+	//max_pes = fit_parameters[13];  // better to assume we're not using it, since we can't tell
 	
 	// update the internal TF1 if we have one
 	if(full_fit_func!=nullptr) full_fit_func->SetParameters(fit_parameters);
+	RefreshParameters();
 }
 
 int DEAPFitFunction::SetParameterLimits(std::vector<std::pair<double,double>> ranges_in){
@@ -636,12 +649,69 @@ double DEAPFitFunction::GetParameter(std::string parname){
 	else return std::numeric_limits<double>::max();
 }
 
+void DEAPFitFunction::RefreshParameters(){
+	// pedestal
+	if(pedestal_func){
+		pedestal_func->SetParameter("ped_mean",ped_mean);
+		pedestal_func->SetParameter("ped_sigma",ped_sigma);
+	}
+	
+	// spe - these parameters aren't actually used; only the npe TF1s are used in the fitting
+	// and they make copies of the spe TF1 on construction. Maintain in case the users wants to draw it?
+	if(spe_func){
+		spe_func->SetParameter("spe_firstgamma_scaling",spe_firstgamma_scaling);
+		spe_func->SetParameter("spe_firstgamma_mean",spe_firstgamma_mean);
+		spe_func->SetParameter("spe_firstgamma_shape",spe_firstgamma_shape);
+		spe_func->SetParameter("spe_secondgamma_scaling",spe_secondgamma_scaling);
+		spe_func->SetParameter("spe_secondgamma_mean_scaling",spe_secondgamma_mean_scaling);
+		spe_func->SetParameter("spe_secondgamma_shape_scaling",spe_secondgamma_shape_scaling);
+		spe_func->SetParameter("spe_expl_scaling",spe_expl_scaling);
+		spe_func->SetParameter("spe_expl_charge_scaling",spe_expl_charge_scaling);
+	}
+	
+	//npe
+	NPE_pars.resize(npe_funcs.back()->GetNpar());
+	// load pars into NPE_pars
+	NPE_pars.at(0) = ped_mean;
+	NPE_pars.at(1) = ped_sigma;
+	for(int j=0; j<max_pes; ++j){
+		for(int pari=0; pari<n_spe_pars; ++pari){
+			NPE_pars.at(2+(j*n_spe_pars)+pari) = spe_func->GetParameter(pari);
+		}
+	}
+	// pass into functions - these are the parameters of the internal functions to the TF1Convolutions
+	for(TF1* apefunc : npe_funcs){
+		apefunc->SetParameters(NPE_pars.data());
+		//apefunc->SetNormalized(true);
+	}
+}
+
 std::vector<std::pair<double,double>> DEAPFitFunction::GetParameterLimits(){
 	return fit_parameter_ranges;
 }
 
 TF1* DEAPFitFunction::GetFullFitFunction(){
 	return full_fit_func;
+}
+
+TF1* DEAPFitFunction::GetPedFunc(){
+	return pedestal_func;
+}
+
+TF1* DEAPFitFunction::GetSPEFunc(){
+	return spe_func;
+}
+
+std::vector<TF1*> DEAPFitFunction::GetNPEFuncs(){
+	return npe_funcs;
+}
+
+std::vector<TF1Convolution*> DEAPFitFunction::GetNPEConvs(){
+	return npe_convolns;
+}
+
+std::vector<double> DEAPFitFunction::GetNPEPars(){
+	return NPE_pars;
 }
 
 double DEAPFitFunction::GetXscaling(){
@@ -653,7 +723,9 @@ double DEAPFitFunction::GetYscaling(){
 }
 
 int DEAPFitFunction::FitTheHisto(){
-	return thehist->Fit(full_fit_func);
+	int fitresult = thehist->Fit(full_fit_func);   // 0 means sucess. Other values... mean something.
+	SetParameters(full_fit_func->GetParameters()); // update the internal members with the fit results
+	return fitresult;
 }
 
 // ========================================================================
@@ -704,6 +776,7 @@ double DEAPFitFunction::SPE_Func(double* x, double* SPE_pars){
 	// Note this still gives a discontinuity at the end of the function, which TF1Convolution
 	// says could be a problem, but it seems to be okay.
 	
+	if(returnval<0) returnval=0;
 	return returnval;
 }
 
@@ -715,8 +788,8 @@ void DEAPFitFunction::ConstructFunctions(){
 		// however for small widths, this results in a VERY large pedestal amplitude....
 		// maybe we should set this to false (maximum=1) and let the firstgamma_scaling do the work...
 		pedestal_func = new TF1("pedestal_func","TMath::Gaus(x, [0], [1], true)", ped_range_min, ped_range_max);
-		pedestal_func->SetParName(0,"pedestal_mean");  // true adds normalization by 1/(sqrt(2pi)*sigma)
-		pedestal_func->SetParName(1,"pedestal_width"); // matches DEAP paper
+		pedestal_func->SetParName(0,"ped_mean");  // true adds normalization by 1/(sqrt(2pi)*sigma)
+		pedestal_func->SetParName(1,"ped_sigma"); // matches DEAP paper
 	}
 	
 	// build the TF1 representing a SPE peak, if we have not yet done so
@@ -731,6 +804,7 @@ void DEAPFitFunction::ConstructFunctions(){
 		spe_func->SetParName(5,"spe_secondgamma_shape_scaling");
 		spe_func->SetParName(6,"spe_expl_scaling");
 		spe_func->SetParName(7,"spe_expl_charge_scaling");
+		n_spe_pars = spe_func->GetNpar();
 	}
 	
 	// loop over the NPE peaks
@@ -744,26 +818,34 @@ void DEAPFitFunction::ConstructFunctions(){
 			// convolve it with the SPE function again
 			std::cout<<"Creating NPE convolution "<<i<<std::endl;
 			TF1Convolution* new_conv = new TF1Convolution(n_minus_one_func, spe_func, npe_func_min, npe_func_max, true);
+			// internally this copy-constructs two NEW TF1s based on it's arguments
+			// so the passed-in functions have no further influence over it
+			// (i.e. we do not need to maintain spe_func parameters beyond this method)
 			//new_conv->SetNofPointsFFT(1000);  // default, should be at least this
 			npe_convolns.push_back(new_conv);
 			// make the function from the convolution
 			std::cout<<"Creating NPE TF1 "<<i<<std::endl;
 			TString funcname = TString::Format("npe_func_%d",i);
 			TF1* npe_func = new TF1(funcname,*new_conv, npe_func_min, npe_func_max, new_conv->GetNpar());
+			// this has no special overload for TF1Convolutions, it's just that a TF1Convolution
+			// implements the operator()(double* x, double* p) method.
+			// EvalPar calls will update the internal functions, and if necessary, re-calculate
+			// the convolution.
+			//
+			// The hitch here? is that in the paper, the SPE function is "normalized to unity".
+			// There is TF1::SetNormalized which will calculate the integral
+			// and normalize the return values... but it doesn't account for changes in parameters!!
+			// (the code even implies it *should* call TF1::Update, but it doesn't... 
+			// Without hacking ROOT, i don't see how this can be achieved...
+			// As a result, the SPE functions do not just vary in shape, they vary in integral,
+			// such that e.g. increasing the SPE peak location decreases its amplitude
+			// This is all the kind of mess that makes calculating priors a nightmare.
 			npe_funcs.push_back(npe_func);
 		}
 	}
 	
 	// increase parameter buffer size if we don't have enough space
-	int par_array_size=0;
-	if(NPE_pars!=nullptr) par_array_size = sizeof(NPE_pars)/sizeof(NPE_pars[0]);
-	int par_count = npe_funcs.back()->GetNpar();
-	if(par_array_size<par_count){
-		if(NPE_pars!=nullptr){
-			delete[] NPE_pars;
-		}
-		NPE_pars = new double[par_count];
-	}
+	NPE_pars.resize(npe_funcs.back()->GetNpar());
 }
 
 double DEAPFitFunction::FullFitFunction(double* x, double* all_pars){
@@ -771,52 +853,48 @@ double DEAPFitFunction::FullFitFunction(double* x, double* all_pars){
 	double ped_scaling = all_pars[1];
 	double* ped_pars = &all_pars[2]; // parameters 2 and 3 are pedestal gaussian mean and sigma
 	double* spe_pars = &all_pars[4]; // parameters 4 to 11 are parameters that describe the SPE shape
-	//double mean_npe = all_pars[12];  // can we pull initial fit value from occupancy?
-	
-	// the contribution from pedestal alone has its own scaling
-	double pedestal_contribution = ped_scaling*pedestal_func->EvalPar(x, ped_pars);
+	double mean_npe = all_pars[12];  // can we pull initial fit value from occupancy?
 	
 	// For the NPE peak TF1's, many of the parameters are redundant due to the way they're built
 	// That means we need to pass it the same parameter value multiple times.
 	// TODO can we remove this redundancy somehow...? Fixing parameter e.g. 3 to be the same as parameter 1?
 	// build the necessary array of parameters
 	// the first couple are always the pedestal
-	NPE_pars[0] = ped_pars[0];
-	NPE_pars[1] = ped_pars[1];
+	NPE_pars.at(0) = ped_pars[0];
+	NPE_pars.at(1) = ped_pars[1];
 	// after that we keep re-convolving with the same SPE function, with the same parameters
-	int n_spe_pars = 7; //spe_func->GetNpar();
-	for(int j=0; j<(max_pes+1); ++j){
+	for(int j=0; j<max_pes; ++j){
 		for(int pari=0; pari<n_spe_pars; ++pari){
-			NPE_pars[2+(j*n_spe_pars)+pari] = spe_pars[pari];
-			NPE_pars[2+(j*n_spe_pars)+pari] = spe_pars[pari];
+			NPE_pars.at(2+(j*n_spe_pars)+pari) = spe_pars[pari];
 		}
 	}
+	
+	// the contribution from pedestal alone has its own scaling
+	double pedestal_contribution = ped_scaling*pedestal_func->EvalPar(x, ped_pars);
+	
+	// because we can't properly normalize the internals of TF1Convolution,
+	// compensate for it by calculating the internal scaling owing from the convolutions
+	spe_func->SetParameters(spe_pars);
+	double spe_integral = spe_func->Integral(histogram_minimum,histogram_maximum);
 	
 	double running_npe_contribution=0;
 	// loop over the NPE peaks
 	for(int i=0; i<max_pes; ++i){
 		// retrieve the TF1 descrbing this NPE peak
-		TF1* this_npe_func = nullptr;
-		if(npe_funcs.size()<(i+1)){
-			std::cerr<<"Not enough NPE funcs!"<<std::endl;
-			ConstructFunctions();
-		}
-		try{
-			this_npe_func = npe_funcs.at(i);
-		} catch (...){
-			std::cerr<<"Failed to retrieve npe function "<<i<<std::endl;
-			ConstructFunctions();
-			this_npe_func = npe_funcs.at(i);
-		}
+		TF1* this_npe_func = npe_funcs.at(i);
 		
 		// evaluate the contribution
-		double this_npe_peak_contribution = this_npe_func->EvalPar(x, NPE_pars);
+		double this_npe_peak_contribution = this_npe_func->EvalPar(x, NPE_pars.data());
+		
+		// compensate for failure to internally normalize
+		double normalization_scaling = pow(spe_integral,-(i+1));
 		
 		// each NPE peak will have an occupancy scaling
 		// based on a Poisson distribution parameterised by the mean number of PE on the tube
 		double poisson_scaling = TMath::Poisson(i+1,mean_npe);  // +1 because i=0 is 1PE, not 0PE
+		
 		// evaluate this npe's contribution at the specified charge
-		running_npe_contribution += (poisson_scaling*this_npe_peak_contribution);
+		running_npe_contribution += (normalization_scaling*poisson_scaling*this_npe_peak_contribution);
 	}
 	
 	// the total number of events with a given charge is then the sum of contributions from pedestal
@@ -853,7 +931,7 @@ double DEAPFitFunction::operator()(double *x, double *p){
 //		
 //		// after that we keep re-convolving with the same SPE function, with the same parameters
 //		int n_spe_pars = spe_func->GetNpar();
-//		for(int j=0; j<(i+1); ++j){
+//		for(int j=0; j<i; ++j){
 //			for(int pari=0; pari<n_spe_pars; ++pari){
 //				this_npe_func->SetParameter(2+(j*n_spe_pars)+pari,spe_pars[pari]);
 //				this_npe_func->SetParameter(2+(j*n_spe_pars)+pari,spe_pars[pari]);

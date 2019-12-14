@@ -50,7 +50,7 @@ class DEAPFitFunction {
 	TH1* ScaleHistoXrange(double inscaling);
 	TH1* ScaleHistoYrange(double inscaling=0);
 	TH1* SmoothHisto(int smoothing=1);
-	bool PeakScan(std::vector<double>* precheck_pars); // search for a peak to use in determining priors
+	bool PeakScan(std::vector<double>* precheck_pars=nullptr); // search for a peak to use in determining priors
 	bool GeneratePriors(std::vector<double>* fit_pars=nullptr,
 						std::vector<std::pair<double,double>>* par_limits=nullptr); // run PeakScan first!
 	
@@ -104,6 +104,12 @@ class DEAPFitFunction {
 	double FullFitFunction(double* x, double* all_pars);
 	double operator()(double *x, double *p);      // for using with a TF1 directly, calls FullFitFunction
 	TF1* GetFullFitFunction();                    // Do not delete the returned object!
+	TF1* GetPedFunc();
+	TF1* GetSPEFunc();
+	std::vector<TF1*> GetNPEFuncs();
+	std::vector<TF1Convolution*> GetNPEConvs();
+	std::vector<double> GetNPEPars();
+	void RefreshParameters();
 	
 	// Operators on the TF1
 	TF1* NameParameters(TF1* thefunc=nullptr);    // set names of parameters
@@ -117,12 +123,12 @@ class DEAPFitFunction {
 	TF1* pedestal_func=nullptr;                   // holds the shape of the pedestal, a TMath::Gaus
 	TF1* spe_func=nullptr;                        // holds the shape of the SPE peak
 	TF1* full_fit_func=nullptr;                   // we may do the entire fitting internally
-	double* NPE_pars=nullptr;                     // buffer to hold parameters as required by NPE peak TF1s
+	std::vector<double> NPE_pars;                 // buffer to hold parameters as required by NPE peak TF1s
 	std::vector<TF1*> npe_funcs;                  // functions used to fit the NPE peaks
 	std::vector<TF1Convolution*> npe_convolns;    // used to obtain the TF1s
 	int fit_success=-1;                           // result of the fit
-	double xscaling=-1;                           // keep track of it, just in case the user wants it back
-	double yscaling=-1;                           // needed to adjust a value from PreCheck for use in a prior.
+	double xscaling=1;                            // keep track of it, just in case the user wants it back
+	double yscaling=1;                            // needed to adjust a value from PreCheck for use in a prior.
 	
 	// static parameters involved in the fitting process
 	// use valid ranges to prevent warnings on creation, they get set later
@@ -135,6 +141,7 @@ class DEAPFitFunction {
 	double npe_func_max=100;                      // upper range of NPE convoluted functions
 	double npe_func_min=0;                        // lower range of NPE convoluted functions
 	int max_pes=3;                                // we'd need to use simulated annealing to fit this
+	int n_spe_pars=8;                             // 
 	
 	// parameters used in PreCheck scan for some second peak beyond pedestal
 	int maxpos1=-1;                               // position of first peak found (pedestal)

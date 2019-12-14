@@ -5,8 +5,11 @@ DEAPFitFunction deapfitter();
 // Make the fit function:
 deapfitter.MakeFullFitFunction();  // Do not delete the returned TF1, it is owned by the DEAPFitFunction object!
 // or
-TF1* full_fit_func = new TF1("full_fit_func",FullFitFunction,0,100,14);
-full_fit_function->NameParameters();
+TF1* full_fit_func = new TF1("full_fit_func",&deapfitter,&DEAPFitFunction::FullFitFunction,0,100,14)
+// or if you want to fit just components of the full fitting function
+//TF1* full_fit_func = new TF1("full_fit_func",&deapfitter,&DEAPFitFunction::Gamma,0,100,14)
+//TF1* full_fit_func = new TF1("full_fit_func",&deapfitter,&DEAPFitFunction::SPE_Func,0,100,14)
+deapfitter.NameParameters(full_fit_func);   // only if you're using the FullFitFunction
 full_fit_func->FixParameter("max_pes", 3);
 
 // pass the histogram to the class so we can use it to generate priors
