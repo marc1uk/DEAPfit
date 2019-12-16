@@ -7,18 +7,18 @@ DEAPFitFunction::DEAPFitFunction(int max_pes_in){
 }
 
 DEAPFitFunction::~DEAPFitFunction(){
-        //std::cout<<"DEAPFitFunction destructor"<<std::endl;
-        ///std::cout<<"Deleting pedestal function"<<std::endl;
-        if(pedestal_func) delete pedestal_func; pedestal_func=nullptr;
-        //std::cout<<"Deleting spe function"<<std::endl;
-        if(spe_func) delete spe_func; spe_func=nullptr;
-        //std::cout<<"Deleting npe functions"<<std::endl;
+	//std::cout<<"DEAPFitFunction destructor"<<std::endl;
+	///std::cout<<"Deleting pedestal function"<<std::endl;
+	if(pedestal_func) delete pedestal_func; pedestal_func=nullptr;
+	//std::cout<<"Deleting spe function"<<std::endl;
+	if(spe_func) delete spe_func; spe_func=nullptr;
+	//std::cout<<"Deleting npe functions"<<std::endl;
 	for(TF1* afunc : npe_funcs) delete afunc;  // do functions built from convolutions own them??? who knows
-        npe_funcs.clear();
-        //std::cout<<"Deleting convolutions"<<std::endl;
+	npe_funcs.clear();
+	//std::cout<<"Deleting convolutions"<<std::endl;
 	for(TF1Convolution* aconv : npe_convolns) delete aconv;
-        npe_convolns.clear();
-        //std::cout<<"Deleting full fit function"<<std::endl;
+	npe_convolns.clear();
+	//std::cout<<"Deleting full fit function"<<std::endl;
 	if(full_fit_func) delete full_fit_func; full_fit_func=nullptr;
 }
 
@@ -819,7 +819,7 @@ double DEAPFitFunction::SPE_Func(double* x, double* SPE_pars){
 }
 
 void DEAPFitFunction::ConstructFunctions(){
-        gROOT->cd();
+	gROOT->cd();
 	// build the TF1 representing the pedestal component, if we have not yet done so
 	if(not pedestal_func){
 		std::cout<<"Creating Pedestal TF1"<<std::endl;
