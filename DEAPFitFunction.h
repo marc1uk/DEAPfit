@@ -73,6 +73,7 @@ class DEAPFitFunction {
 	int SetParameters(std::vector<double> fit_parameters);  // returns 1 on success
 	void SetParameters(double* fit_parameters);
 	int SetParameterLimits(std::vector<std::pair<double,double>> ranges_in);
+	void RefreshParameters();  // pass internal member parameters to internal functions
 	
 	// parameter fixers
 	void FixPrescaling(const double &prescaling_in);
@@ -103,13 +104,17 @@ class DEAPFitFunction {
 	double SPE_Func(double* x, double* SPE_pars);
 	double FullFitFunction(double* x, double* all_pars);
 	double operator()(double *x, double *p);      // for using with a TF1 directly, calls FullFitFunction
-	TF1* GetFullFitFunction();                    // Do not delete the returned object!
+	
+	// retrieving the internals: Do not delete the returned objects!
+	TF1* GetFullFitFunction();
 	TF1* GetPedFunc();
 	TF1* GetSPEFunc();
 	std::vector<TF1*> GetNPEFuncs();
 	std::vector<TF1Convolution*> GetNPEConvs();
 	std::vector<double> GetNPEPars();
-	void RefreshParameters();
+	
+	// Misc additional functions: for extracting gain from the fit
+	double GetMeanSPECharge();
 	
 	// Operators on the TF1
 	TF1* NameParameters(TF1* thefunc=nullptr);    // set names of parameters

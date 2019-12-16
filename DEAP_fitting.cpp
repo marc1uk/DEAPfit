@@ -38,6 +38,13 @@
 #define STORE_PRIORS 1
 #endif
 
+#ifndef STORE_DEBUG_EXTRAS
+#define STORE_DEBUG_EXTRAS 1
+#endif
+
+constexpr double ELECTRON_CHARGE = 1.6E-19;
+constexpr double ELECTRON_CHARGE_IN_PICOCOULOMBS = ELECTRON_CHARGE*1E12;
+
 int main(int argc, const char* argv[]){
     
     if(argc<2){
@@ -161,12 +168,23 @@ int main(int argc, const char* argv[]){
     
     if(c1==nullptr){ std::cout<<"No canvas"<<std::endl; return 0; }
     
+    // try to pull the voltage and run number from the filename
+    // probably will only work for ToolAnalysis calibration runs with a particular naming scheme.
+    // expect something like: R1214S0_1000V_PMTStability_Run0.root
+    int RunNum=0;
+    int SubRun=0;
+    int Voltage=0;
+    int cnt = sscanf(filename.c_str(),"R%dS%d_%dV",&RunNum,&SubRun,&Voltage);
+    
     // make an output file in which to save results
     TFile* outfile = new TFile("./DEAPfitter_outfile.root","RECREATE");
     outfile->cd();
     TTree* outtree = new TTree("fit_parameters","fit_parameters");
     int file_detectorkey;
     TBranch* bDetKey = outtree->Branch("DetectorKey",&file_detectorkey);
+    TBranch* bRunNum = outtree->Branch("Run",&RunNum);
+    TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
+    TBranch* bVoltage = outtree->Branch("Voltage",&Voltage);
     int file_fit_success;
     TBranch* bfit_success = outtree->Branch("fit_success", &file_fit_success);
     double file_prescaling;
@@ -197,6 +215,15 @@ int main(int argc, const char* argv[]){
     TBranch* bspe_expl_charge_scaling = outtree->Branch("spe_expl_charge_scaling", &file_spe_expl_charge_scaling);
     TBranch* bmean_npe = outtree->Branch("mean_npe", &file_mean_npe);
     TBranch* bmax_pes = outtree->Branch("max_pes", &file_max_pes);
+    
+    // the money numbers
+    double file_mean_spe_charge;
+    double file_gain;
+    double file_spe_firstgamma_gain; // for reference...
+    TBranch* bmean_spe_charge = outtree->Branch("mean_spe_charge", &file_mean_spe_charge);
+    TBranch* bgain = outtree->Branch("gain", &file_gain);
+    TBranch* bspe_firstgamma_gain = outtree->Branch("spe_firstgamma_gain", &file_spe_firstgamma_gain);
+    
     // also store all our priors for debug
 #ifdef STORE_PRIORS
     double file_prescaling_prior;
@@ -227,7 +254,8 @@ int main(int argc, const char* argv[]){
     TBranch* bspe_expl_charge_scaling_prior = outtree->Branch("spe_expl_charge_scaling_prior", &file_spe_expl_charge_scaling_prior);
     TBranch* bmean_npe_prior = outtree->Branch("mean_npe_prior", &file_mean_npe_prior);
     TBranch* bmax_pes_prior = outtree->Branch("max_pes_prior", &file_max_pes_prior);
-    
+#endif  // STORE_PRIORS
+#ifdef STORE_DEBUG_EXTRAS
     // also store some of the parameters used in determining priors, in case this is useful
     int file_maxpos1;
     int file_maxpos2;
@@ -247,7 +275,7 @@ int main(int argc, const char* argv[]){
     TBranch* bintermin = outtree->Branch("intermin", &file_intermin);
     TBranch* bspe_peak_found = outtree->Branch("spe_peak_found", &file_spe_peak_found);
     TBranch* byscaling = outtree->Branch("scaling", &file_yscaling);
-#endif
+#endif // STORE_DEBUG_EXTRAS
     // OK, file made
     
     // =========================================
@@ -294,8 +322,6 @@ int main(int argc, const char* argv[]){
             xscaling = 1000;
         } else if(filesourcestring=="TestStand"){
             // for test stand results the distributions are in electron counts
-            double ELECTRON_CHARGE = 1.6E-19;
-            double ELECTRON_CHARGE_IN_PICOCOULOMBS = ELECTRON_CHARGE*1E12;
             xscaling = ELECTRON_CHARGE_IN_PICOCOULOMBS;
         }
         deapfitter.ScaleHistoXrange(xscaling);     // fix X-axis to picoCoulombs
@@ -452,6 +478,12 @@ int main(int argc, const char* argv[]){
         file_spe_expl_charge_scaling = fit_parameters.at(11);
         file_mean_npe = fit_parameters.at(12);
         file_max_pes = fit_parameters.at(13);
+        
+        // Extract gain
+        file_mean_spe_charge = deapfitter.GetMeanSPECharge();
+        file_gain = (file_mean_spe_charge-file_ped_mean)/ELECTRON_CHARGE_IN_PICOCOULOMBS;
+        file_spe_firstgamma_gain = (file_spe_firstgamma_mean-file_ped_mean)/ELECTRON_CHARGE_IN_PICOCOULOMBS;
+        
         outtree->Fill();
         outtree->Write("fit_parameters",TObject::kOverwrite);
         

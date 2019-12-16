@@ -150,6 +150,9 @@ bool DEAPFitFunction::PeakScan(std::vector<double>* precheck_pars){
 			 // it's position is 'sufficiently far' from the valley:
 			 // don't consider a SPE peak that's in an adjacent bin to the valley
 			 ((bini-interpos)>3) &&
+			 // don't consider situations where the 'valley' has 0 counts
+			 // (typically we've run off the end of the distribution and hit noise
+			 (intermin>0) &&
 			 // and this is 'sqrt(minima)' above the minima, i.e. 'large enough' to be SPE peak
 			 (bincont>(intermin+2.*sqrt(intermin))) &&
 			 // and this has at least 8% of the total counts, or 20 counts (for high histograms IIRC)
@@ -726,6 +729,16 @@ int DEAPFitFunction::FitTheHisto(){
 	int fitresult = thehist->Fit(full_fit_func);   // 0 means sucess. Other values... mean something.
 	SetParameters(full_fit_func->GetParameters()); // update the internal members with the fit results
 	return fitresult;
+}
+
+double DEAPFitFunction::GetMeanSPECharge(){
+	// the mean SPE charge is not directly the spe_firstgamma_mean, due since the SPE peak
+	// contains other components. We therefore need to extract the mean from the SPE function
+	// as a whole
+	// first make sure our SPE TF1 is up-to-date with the latest parameters
+	RefreshParameters();
+	// Now measure it's mean
+	return spe_func->Mean(histogram_minimum,histogram_maximum);
 }
 
 // ========================================================================
