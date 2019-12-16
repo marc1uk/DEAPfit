@@ -1,4 +1,4 @@
-/* vim:set noexpandtab tabstop=4 wrap */
+/* vim:set expandtab tabstop=4 wrap */
 
 #include <string>
 //#include <ctime>
@@ -33,6 +33,7 @@
 #include "Math/MinimizerOptions.h"
 
 #include "DEAPFitFunction.h"
+#include "sarge.h"
 
 #ifndef STORE_PRIORS
 #define STORE_PRIORS 1
@@ -44,18 +45,236 @@
 
 constexpr double ELECTRON_CHARGE = 1.6E-19;
 constexpr double ELECTRON_CHARGE_IN_PICOCOULOMBS = ELECTRON_CHARGE*1E12;
+constexpr int max_pes = 3;
 
 int main(int argc, const char* argv[]){
     
-    if(argc<2){
-        std::cerr<<"usage: "<<argv[0]<<" 'file' 'source'"<<std::endl;
-        std::cerr<<"file must be a full absolute path. It may be a a root macro containing a histogram, "
-                 <<" or a .root file containing many histograms."<<std::endl
-                 <<"The file source may be either ToolAnalysis calibration runs (0, default), "
-                 <<" or the PMT Test Stand (1), specified by the 'source' argument" // TODO
-                 <<std::endl;
-        return 0;
+    // =========================================
+    // INPUT PARSING WITH SARGE
+    // =========================================
+    
+    // Create a Sarge to parse arguments
+    Sarge sarge;
+    // configure sarge with this programs arguments
+    sarge.setArgument("h", "help", "Get help.", false);
+    sarge.setArgument("t", "type", "Did the input files come from the PMT Test Stand (0) or ToolAnalysis (1, default)", true);
+    sarge.setArgument("s", "start", "Skip this many histograms before starting (default 0)", true);
+    sarge.setArgument("n", "numhistos", "Process this many histograms before exiting (0, default=all from start)", true);
+    sarge.setArgument("p", "precut", "Should offset and numhistos consider all histograms (0) or only those passing the PeakScan pre-cut (1, default)", true);
+    sarge.setArgument("o", "output", "Name of output file (default 'DEAPfitter_outfile.root')", true);
+    sarge.setArgument("j", "justscan", "Just do PeakScan and print histograms viable for fitting", false);
+    sarge.setDescription("Program to try to fit PMT pulse charge distributions in order to extract gain");
+    sarge.setUsage("deapfit <options> <inputfiles>");
+    
+    if(!sarge.parseArguments(argc, argv)){
+        std::cerr << "Couldn't parse arguments..." << std::endl;
+        return 1;
     }
+    
+    if(sarge.exists("help")){ sarge.printHelp(); }
+    
+    // get the type of input file
+    // this is used to determine the x-axis units, and scaling required to put in pC
+    std::string filesourcestring = "ToolAnalysis";
+    std::string requestedtype;
+    if(sarge.getFlag("type", requestedtype)){
+        if     (requestedtype=="0"){ filesourcestring = "TestStand";    }
+        else if(requestedtype=="1"){ filesourcestring = "ToolAnalysis"; }
+        else { std::cerr<<"Unrecognised input type: "<<requestedtype
+                        <<", options are 0: PMT Test Stand, 1: ToolAnalysis"<<std::endl;
+               return 1;
+        }
+    }
+    
+    // get number of histograms to analyse; default all of them
+    int histos_to_analyse = 0;  // all of them
+    std::string requestednhistos;
+    if(sarge.getFlag("numhistos", requestednhistos)){
+        histos_to_analyse = stoi(requestednhistos);
+    }
+    std::cout<<"Will analyse ";
+    if(histos_to_analyse>0) std::cout<< histos_to_analyse << " histograms ";
+    else                    std::cout<<"all histograms ";
+    
+    // get the number of the first histogram from which to start processing
+    int offset = 0;
+    std::string requestedoffset;
+    if(sarge.getFlag("start", requestedoffset)){
+        offset = stoi(requestedoffset);
+    }
+    std::cout<<"starting from ";
+    if(offset>0) std::cout<< "histogram " << offset;
+    else         std::cout<< "the first histogram";
+    
+    // get whether offset and histos_to_analyse should consider only those passing PeakScan pre-cut
+    int precut = 1; // true, only those passing precut
+    std::string requestedprecut;
+    if(sarge.getFlag("precut", requestedprecut)){
+        precut = stoi(requestedprecut);
+    }
+    std::cout<<", considering ";
+    if(precut) std::cout<<"only those that pass PeakScan check"<<std::endl;
+    else       std::cout<<"all histograms, regardless of their PreScan result"<<std::endl;
+    
+    // get output filename
+    std::string outputfilename = "DEAPfitter_outfile.root"; // default
+    sarge.getFlag("output", outputfilename);
+    
+    // check if we're just doing a pre-scan
+    int prescan_only = sarge.exists("justscan");
+    if(prescan_only){
+        // strip off extention
+        std::string filenamewithoutextention = outputfilename;
+        if(outputfilename.find(".") != std::string::npos){
+            filenamewithoutextention = outputfilename.substr(0, outputfilename.find_last_of('.'));
+        }
+        // replace with .txt
+        outputfilename = filenamewithoutextention+".txt";
+        std::cout<<"Will output a list of histograms passing PeakScan to "<<outputfilename<<std::endl;
+    } else {
+        std::cout<<"Results will be written to "<<outputfilename<<std::endl;
+    }
+    
+    // get input files
+    std::vector<std::string> inputfiles;
+    std::string inputfile;
+    int filei=0;
+    while(sarge.getTextArgument(filei, inputfile)){
+        inputfiles.push_back(inputfile);
+        filei++;
+    }
+    
+    // =========================================
+    // END OF INPUT PARSING
+    // MAKE THE OUTPUT FILE
+    // =========================================
+    
+    // declare variables for proper fitting output
+    TFile* outfile=nullptr;
+    TTree* outtree=nullptr;
+    
+    int RunNum=0;
+    int SubRun=0;
+    int Voltage=0;
+    int file_detectorkey;
+    int file_fit_success;
+    double file_prescaling;
+    double file_ped_scaling;
+    double file_ped_mean;
+    double file_ped_sigma;
+    double file_spe_firstgamma_scaling;
+    double file_spe_firstgamma_mean;
+    double file_spe_firstgamma_shape;
+    double file_spe_secondgamma_scaling;
+    double file_spe_secondgamma_mean_scaling;
+    double file_spe_secondgamma_shape_scaling;
+    double file_spe_expl_scaling;
+    double file_spe_expl_charge_scaling;
+    double file_mean_npe;
+    double file_max_pes;
+    double file_mean_spe_charge;
+    double file_gain;
+    double file_spe_firstgamma_gain; // for reference...
+#ifdef STORE_PRIORS
+    double file_prescaling_prior;
+    double file_ped_scaling_prior;
+    double file_ped_mean_prior;
+    double file_ped_sigma_prior;
+    double file_spe_firstgamma_scaling_prior;
+    double file_spe_firstgamma_mean_prior;
+    double file_spe_firstgamma_shape_prior;
+    double file_spe_secondgamma_scaling_prior;
+    double file_spe_secondgamma_mean_scaling_prior;
+    double file_spe_secondgamma_shape_scaling_prior;
+    double file_spe_expl_scaling_prior;
+    double file_spe_expl_charge_scaling_prior;
+    double file_mean_npe_prior;
+    double file_max_pes_prior;
+#endif
+#ifdef STORE_DEBUG_EXTRAS
+    int file_maxpos1;
+    int file_maxpos2;
+    int file_interpos;
+    int file_max1;
+    int file_max2;
+    int file_peaktovalleymin;
+    int file_intermin;
+    bool file_spe_peak_found;
+    double file_yscaling;
+#endif
+    
+    // or in the case of just prescan
+    std::ofstream passingHistos;
+    
+    if(not prescan_only){
+    // make an output file in which to save results
+    outfile = new TFile(outputfilename.c_str(),"RECREATE");
+    outfile->cd();
+    outtree = new TTree("fit_parameters","fit_parameters");
+    TBranch* bDetKey = outtree->Branch("DetectorKey",&file_detectorkey);
+    TBranch* bRunNum = outtree->Branch("Run",&RunNum);
+    TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
+    TBranch* bVoltage = outtree->Branch("Voltage",&Voltage);
+    TBranch* bfit_success = outtree->Branch("fit_success", &file_fit_success);
+    TBranch* bprescaling = outtree->Branch("prescaling", &file_prescaling);
+    TBranch* bped_scaling = outtree->Branch("ped_scaling", &file_ped_scaling);
+    TBranch* bped_mean = outtree->Branch("ped_mean", &file_ped_mean);
+    TBranch* bped_sigma = outtree->Branch("ped_sigma", &file_ped_sigma);
+    TBranch* bspe_firstgamma_scaling = outtree->Branch("spe_firstgamma_scaling", &file_spe_firstgamma_scaling);
+    TBranch* bspe_firstgamma_mean = outtree->Branch("spe_firstgamma_mean", &file_spe_firstgamma_mean);
+    TBranch* bspe_firstgamma_shape = outtree->Branch("spe_firstgamma_shape", &file_spe_firstgamma_shape);
+    TBranch* bspe_secondgamma_scaling = outtree->Branch("spe_secondgamma_scaling", &file_spe_secondgamma_scaling);
+    TBranch* bspe_secondgamma_mean_scaling = outtree->Branch("spe_secondgamma_mean_scaling", &file_spe_secondgamma_mean_scaling);
+    TBranch* bspe_secondgamma_shape_scaling = outtree->Branch("spe_secondgamma_shape_scaling", &file_spe_secondgamma_shape_scaling);
+    TBranch* bspe_expl_scaling = outtree->Branch("spe_expl_scaling", &file_spe_expl_scaling);
+    TBranch* bspe_expl_charge_scaling = outtree->Branch("spe_expl_charge_scaling", &file_spe_expl_charge_scaling);
+    TBranch* bmean_npe = outtree->Branch("mean_npe", &file_mean_npe);
+    TBranch* bmax_pes = outtree->Branch("max_pes", &file_max_pes);
+    
+    // the money numbers
+    TBranch* bmean_spe_charge = outtree->Branch("mean_spe_charge", &file_mean_spe_charge);
+    TBranch* bgain = outtree->Branch("gain", &file_gain);
+    TBranch* bspe_firstgamma_gain = outtree->Branch("spe_firstgamma_gain", &file_spe_firstgamma_gain);
+    
+    // also store all our priors for debug
+#ifdef STORE_PRIORS
+    TBranch* bprescaling_prior = outtree->Branch("prescaling_prior", &file_prescaling_prior);
+    TBranch* bped_scaling_prior = outtree->Branch("ped_scaling_prior", &file_ped_scaling_prior);
+    TBranch* bped_mean_prior = outtree->Branch("ped_mean_prior", &file_ped_mean_prior);
+    TBranch* bped_sigma_prior = outtree->Branch("ped_sigma_prior", &file_ped_sigma_prior);
+    TBranch* bspe_firstgamma_scaling_prior = outtree->Branch("spe_firstgamma_scaling_prior", &file_spe_firstgamma_scaling_prior);
+    TBranch* bspe_firstgamma_mean_prior = outtree->Branch("spe_firstgamma_mean_prior", &file_spe_firstgamma_mean_prior);
+    TBranch* bspe_firstgamma_shape_prior = outtree->Branch("spe_firstgamma_shape_prior", &file_spe_firstgamma_shape_prior);
+    TBranch* bspe_secondgamma_scaling_prior = outtree->Branch("spe_secondgamma_scaling_prior", &file_spe_secondgamma_scaling_prior);
+    TBranch* bspe_secondgamma_mean_scaling_prior = outtree->Branch("spe_secondgamma_mean_scaling_prior", &file_spe_secondgamma_mean_scaling_prior);
+    TBranch* bspe_secondgamma_shape_scaling_prior = outtree->Branch("spe_secondgamma_shape_scaling_prior", &file_spe_secondgamma_shape_scaling_prior);
+    TBranch* bspe_expl_scaling_prior = outtree->Branch("spe_expl_scaling_prior", &file_spe_expl_scaling_prior);
+    TBranch* bspe_expl_charge_scaling_prior = outtree->Branch("spe_expl_charge_scaling_prior", &file_spe_expl_charge_scaling_prior);
+    TBranch* bmean_npe_prior = outtree->Branch("mean_npe_prior", &file_mean_npe_prior);
+    TBranch* bmax_pes_prior = outtree->Branch("max_pes_prior", &file_max_pes_prior);
+#endif  // STORE_PRIORS
+#ifdef STORE_DEBUG_EXTRAS
+    // also store some of the parameters used in determining priors, in case this is useful
+    TBranch* bmaxpos1 = outtree->Branch("maxpos1", &file_maxpos1);
+    TBranch* bmaxpos2 = outtree->Branch("maxpos2", &file_maxpos2);
+    TBranch* binterpos = outtree->Branch("interpos", &file_interpos);
+    TBranch* bmax1 = outtree->Branch("max1", &file_max1);
+    TBranch* bmax2 = outtree->Branch("max2", &file_max2);
+    TBranch* bpeaktovalleymin = outtree->Branch("peaktovalleymin", &file_peaktovalleymin);
+    TBranch* bintermin = outtree->Branch("intermin", &file_intermin);
+    TBranch* bspe_peak_found = outtree->Branch("spe_peak_found", &file_spe_peak_found);
+    TBranch* byscaling = outtree->Branch("scaling", &file_yscaling);
+#endif // STORE_DEBUG_EXTRAS
+    // OK, file made
+    } else {
+    // prescan only
+    passingHistos.open(outputfilename.c_str(), std::ios::out);
+    }
+    
+    // ==================================
+    // END OF OUTPUT FILE CREATION
+    // MOVE TO LOOPING OVER INPUT FILES
+    // ==================================
     
     // make the TApplication for drawing
     int myargc = 1;
@@ -63,11 +282,32 @@ int main(int argc, const char* argv[]){
     char* myargv[]={arg1};
     TApplication *FitApp = new TApplication("FitApp",&myargc,myargv);
     
-    // get the filename
-    std::string filename = argv[1];
-    // get it's extension to get the type
+    // misc variables to keep track of things in each file
+    std::map<int,TH1*> histos_to_fit;
+    TCanvas* c1=nullptr;
+    TH1* thehist=nullptr;
+    TFile* infile=nullptr;    // close when we're done
+    std::map<int,int> types;  // types of input files, .C or .root. Just to check we don't mix.
+    int analysed_histo_count=0;
+    int offsetcount=0;
+    int histos_with_a_peak=0;
+    
+    // construct the fit function
+    DEAPFitFunction deapfitter(max_pes);
+    deapfitter.MakeFullFitFunction();
+    
+    // scan over input files and pull the histograms we're going to analyse
+    for(std::string& filename : inputfiles){
+    
+    histos_to_fit.clear();
+    
+    // ==================================
+    // SCAN FOR HISTOGRAMS IN THIS FILE
+    // ==================================
+    
+    // get next file's extension to get the type
     std::string extension;
-    if (filename.find(".") != std::string::npos){
+    if(filename.find(".") != std::string::npos){
         extension = filename.substr(filename.find_last_of('.'), filename.length()-filename.find_last_of('.'));
     } else {
         std::cerr<<"could not locate '.' in filename!? Can't identify filetype!"<<std::endl;
@@ -75,23 +315,14 @@ int main(int argc, const char* argv[]){
     }
     std::cout<<"filename is: "<<filename<<std::endl;
     std::cout<<"extension is: "<<extension<<std::endl;
-    
-    // get the source of file: PMT test stand or ToolAnalysis
-    // this is used to determine the x-axis units, and scaling required to put in pC
-    int filesource = (argc<3) ? 1 : atoi(argv[2]);
-    std::string filesourcestring = (filesource) ? "ToolAnalysis" : "TestStand";
-    
-    // XXX DEBUG
-    //filename = "/home/marc/Documents/PhD/PMTs/PMT_Test_Station/results/DEAP_refit/gain1300V_WB012.C";
-    //filename = "/home/marc/Documents/PhD/PMTs/PMT_Test_Station/results/DEAP_refit/LEDRun1171S0LED6And10_PulseWindowOnly_PMTStability_Run32540.root";
-    // XXX DEBUG
-    
-    std::map<int,TH1*> histos_to_fit;
-    TCanvas* c1=nullptr;
-    TH1* thehist=nullptr;
-    TFile* infile=nullptr; // close when we're done
     // handle standalone histogram files
     if(extension==".C"||extension==".c"){
+        if(types.count(1)){
+            std::cerr<<"Please don't mix input files of type .C and .root, detector keys will be meaningless."
+                     <<std::endl;
+            return 1;
+        }
+        if(types.size()==0) types.emplace(0,1);
         // plot the histogram from file
         std::string rootcommand=".x " + filename;
         std::cout<<"Executing command "<<rootcommand<<std::endl;
@@ -123,12 +354,24 @@ int main(int argc, const char* argv[]){
             if(obj->InheritsFrom("TH1")){
                 //std::cout<<"it's the histogram!"<<obj->GetName()<<std::endl;
                 TH1* thehist=(TH1*)obj;
-                histos_to_fit.emplace(0,thehist);
+                // stop ROOT from deleting it once we draw the next histogram over it...
+                thehist->SetDirectory(0);
+                thehist->ResetBit(kCanDelete);
+                // but then no-one deletes these. That's probably fine? They'll be cleaned up on terminate...
+                // we could track them and delete them as we go, but does it offer
+                // any advantage since we pool all our histos at the start? TODO improve
+                histos_to_fit.emplace(histos_to_fit.size(),thehist); // XXX detkey is just histogram number!
                 break;
             }
         }
     // handle root files
     } else if(extension==".root"){
+        if(types.count(0)){
+            std::cerr<<"Please don't mix input files of type .C and .root, detector keys will be meaningless."
+                     <<std::endl;
+            return 1;
+        }
+        if(types.size()==0) types.emplace(1,1);
         // Open root file
         infile = TFile::Open(filename.c_str(),"READ");
         // pull out all the pulse charge distribution histograms
@@ -161,159 +404,65 @@ int main(int argc, const char* argv[]){
             }
         } // end loop over keys in file
         
-        // also make a canvas
-        c1 = new TCanvas("c1");
+        // also make a canvas if we don't have one
+        if(c1==nullptr) c1 = new TCanvas("c1");
     } // end rootfile case
     std::cout<<"Found "<<histos_to_fit.size()<<" histograms to fit"<<std::endl;
     
-    if(c1==nullptr){ std::cout<<"No canvas"<<std::endl; return 0; }
+    if(c1==nullptr){ c1 = new TCanvas("c1"); }
     
-    // try to pull the voltage and run number from the filename
-    // probably will only work for ToolAnalysis calibration runs with a particular naming scheme.
+    // try to pull the voltage and run number from the ToolAnalysis filename
     // expect something like: R1214S0_1000V_PMTStability_Run0.root
-    int RunNum=0;
-    int SubRun=0;
-    int Voltage=0;
     int cnt = sscanf(filename.c_str(),"R%dS%d_%dV",&RunNum,&SubRun,&Voltage);
     
-    // make an output file in which to save results
-    TFile* outfile = new TFile("./DEAPfitter_outfile.root","RECREATE");
-    outfile->cd();
-    TTree* outtree = new TTree("fit_parameters","fit_parameters");
-    int file_detectorkey;
-    TBranch* bDetKey = outtree->Branch("DetectorKey",&file_detectorkey);
-    TBranch* bRunNum = outtree->Branch("Run",&RunNum);
-    TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
-    TBranch* bVoltage = outtree->Branch("Voltage",&Voltage);
-    int file_fit_success;
-    TBranch* bfit_success = outtree->Branch("fit_success", &file_fit_success);
-    double file_prescaling;
-    double file_ped_scaling;
-    double file_ped_mean;
-    double file_ped_sigma;
-    double file_spe_firstgamma_scaling;
-    double file_spe_firstgamma_mean;
-    double file_spe_firstgamma_shape;
-    double file_spe_secondgamma_scaling;
-    double file_spe_secondgamma_mean_scaling;
-    double file_spe_secondgamma_shape_scaling;
-    double file_spe_expl_scaling;
-    double file_spe_expl_charge_scaling;
-    double file_mean_npe;
-    double file_max_pes;
-    TBranch* bprescaling = outtree->Branch("prescaling", &file_prescaling);
-    TBranch* bped_scaling = outtree->Branch("ped_scaling", &file_ped_scaling);
-    TBranch* bped_mean = outtree->Branch("ped_mean", &file_ped_mean);
-    TBranch* bped_sigma = outtree->Branch("ped_sigma", &file_ped_sigma);
-    TBranch* bspe_firstgamma_scaling = outtree->Branch("spe_firstgamma_scaling", &file_spe_firstgamma_scaling);
-    TBranch* bspe_firstgamma_mean = outtree->Branch("spe_firstgamma_mean", &file_spe_firstgamma_mean);
-    TBranch* bspe_firstgamma_shape = outtree->Branch("spe_firstgamma_shape", &file_spe_firstgamma_shape);
-    TBranch* bspe_secondgamma_scaling = outtree->Branch("spe_secondgamma_scaling", &file_spe_secondgamma_scaling);
-    TBranch* bspe_secondgamma_mean_scaling = outtree->Branch("spe_secondgamma_mean_scaling", &file_spe_secondgamma_mean_scaling);
-    TBranch* bspe_secondgamma_shape_scaling = outtree->Branch("spe_secondgamma_shape_scaling", &file_spe_secondgamma_shape_scaling);
-    TBranch* bspe_expl_scaling = outtree->Branch("spe_expl_scaling", &file_spe_expl_scaling);
-    TBranch* bspe_expl_charge_scaling = outtree->Branch("spe_expl_charge_scaling", &file_spe_expl_charge_scaling);
-    TBranch* bmean_npe = outtree->Branch("mean_npe", &file_mean_npe);
-    TBranch* bmax_pes = outtree->Branch("max_pes", &file_max_pes);
-    
-    // the money numbers
-    double file_mean_spe_charge;
-    double file_gain;
-    double file_spe_firstgamma_gain; // for reference...
-    TBranch* bmean_spe_charge = outtree->Branch("mean_spe_charge", &file_mean_spe_charge);
-    TBranch* bgain = outtree->Branch("gain", &file_gain);
-    TBranch* bspe_firstgamma_gain = outtree->Branch("spe_firstgamma_gain", &file_spe_firstgamma_gain);
-    
-    // also store all our priors for debug
-#ifdef STORE_PRIORS
-    double file_prescaling_prior;
-    double file_ped_scaling_prior;
-    double file_ped_mean_prior;
-    double file_ped_sigma_prior;
-    double file_spe_firstgamma_scaling_prior;
-    double file_spe_firstgamma_mean_prior;
-    double file_spe_firstgamma_shape_prior;
-    double file_spe_secondgamma_scaling_prior;
-    double file_spe_secondgamma_mean_scaling_prior;
-    double file_spe_secondgamma_shape_scaling_prior;
-    double file_spe_expl_scaling_prior;
-    double file_spe_expl_charge_scaling_prior;
-    double file_mean_npe_prior;
-    double file_max_pes_prior;
-    TBranch* bprescaling_prior = outtree->Branch("prescaling_prior", &file_prescaling_prior);
-    TBranch* bped_scaling_prior = outtree->Branch("ped_scaling_prior", &file_ped_scaling_prior);
-    TBranch* bped_mean_prior = outtree->Branch("ped_mean_prior", &file_ped_mean_prior);
-    TBranch* bped_sigma_prior = outtree->Branch("ped_sigma_prior", &file_ped_sigma_prior);
-    TBranch* bspe_firstgamma_scaling_prior = outtree->Branch("spe_firstgamma_scaling_prior", &file_spe_firstgamma_scaling_prior);
-    TBranch* bspe_firstgamma_mean_prior = outtree->Branch("spe_firstgamma_mean_prior", &file_spe_firstgamma_mean_prior);
-    TBranch* bspe_firstgamma_shape_prior = outtree->Branch("spe_firstgamma_shape_prior", &file_spe_firstgamma_shape_prior);
-    TBranch* bspe_secondgamma_scaling_prior = outtree->Branch("spe_secondgamma_scaling_prior", &file_spe_secondgamma_scaling_prior);
-    TBranch* bspe_secondgamma_mean_scaling_prior = outtree->Branch("spe_secondgamma_mean_scaling_prior", &file_spe_secondgamma_mean_scaling_prior);
-    TBranch* bspe_secondgamma_shape_scaling_prior = outtree->Branch("spe_secondgamma_shape_scaling_prior", &file_spe_secondgamma_shape_scaling_prior);
-    TBranch* bspe_expl_scaling_prior = outtree->Branch("spe_expl_scaling_prior", &file_spe_expl_scaling_prior);
-    TBranch* bspe_expl_charge_scaling_prior = outtree->Branch("spe_expl_charge_scaling_prior", &file_spe_expl_charge_scaling_prior);
-    TBranch* bmean_npe_prior = outtree->Branch("mean_npe_prior", &file_mean_npe_prior);
-    TBranch* bmax_pes_prior = outtree->Branch("max_pes_prior", &file_max_pes_prior);
-#endif  // STORE_PRIORS
-#ifdef STORE_DEBUG_EXTRAS
-    // also store some of the parameters used in determining priors, in case this is useful
-    int file_maxpos1;
-    int file_maxpos2;
-    int file_interpos;
-    int file_max1;
-    int file_max2;
-    int file_peaktovalleymin;
-    int file_intermin;
-    bool file_spe_peak_found;
-    double file_yscaling;
-    TBranch* bmaxpos1 = outtree->Branch("maxpos1", &file_maxpos1);
-    TBranch* bmaxpos2 = outtree->Branch("maxpos2", &file_maxpos2);
-    TBranch* binterpos = outtree->Branch("interpos", &file_interpos);
-    TBranch* bmax1 = outtree->Branch("max1", &file_max1);
-    TBranch* bmax2 = outtree->Branch("max2", &file_max2);
-    TBranch* bpeaktovalleymin = outtree->Branch("peaktovalleymin", &file_peaktovalleymin);
-    TBranch* bintermin = outtree->Branch("intermin", &file_intermin);
-    TBranch* bspe_peak_found = outtree->Branch("spe_peak_found", &file_spe_peak_found);
-    TBranch* byscaling = outtree->Branch("scaling", &file_yscaling);
-#endif // STORE_DEBUG_EXTRAS
-    // OK, file made
-    
     // =========================================
-    // Initialization Complete, Move to Fitting
+    // END OF HISTOGRAM SCAN
+    // MOVE TO FITTING HISTOGRAMS
     // =========================================
-    
-    // define our fit function:
-    int max_pes = 3;
-    DEAPFitFunction deapfitter(max_pes);
-    //TTF1* full_fit_func = new TF1("full_fit_func",FullFitFunction,0,100,14);  // you can do it this way, but it's more effort
-    deapfitter.MakeFullFitFunction();
     
     // Loop over histos to fit
-    int analysed_histo_count=0;
-    int histos_to_analyse = (argc<5) ? 0 : atoi(argv[4]);
-    int offset = (argc<4) ? 0 : atoi(argv[3]);
-    int offsetcount=0;
     for(auto&& ahisto : histos_to_fit){
-        // skip until requested histo
-        if(offsetcount<offset){
-            ++offsetcount;
-            continue;
-        }
-        analysed_histo_count++;
-        if((analysed_histo_count>histos_to_analyse)&&(histos_to_analyse>0)) break;
         // get next histogram
         int detkey = ahisto.first;
         thehist = ahisto.second;
         if(thehist==nullptr){ std::cerr<<"No hist"<<std::endl; return 0; }
         
+        if(precut==0){
+            // offset and histos_to_analyse should consider all histograms, not just those passing PeakScan
+            if(offsetcount<offset){
+                ++offsetcount;
+                continue;
+            }
+        }
+        
         // pass to the fitter
         deapfitter.SetHisto(thehist);
         deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
+        // ↑ FIXME for histos with a small number of bins TH1::Smooth ADDS valleys where there were none before!
         
         // Scan for a second peak after pedestal
         std::vector<double> precheck_pars;
         bool found_spe_peak = deapfitter.PeakScan(&precheck_pars);
         if(not found_spe_peak) continue; // sorry, if we can't find a second bump, i can't generate suitable priors
+        
+        histos_with_a_peak++;
+        if(prescan_only){
+            // if just counting viable histograms, print details, increase count in this file and continue
+            std::cout<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+            passingHistos<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+            continue;
+        }
+        
+        // skip until requested histo
+        if(precut){
+            // offset and histos_to_analyse should only count histograms after they've passed PeakScan
+            if(offsetcount<offset){
+                ++offsetcount;
+                continue;
+            }
+        }
+        analysed_histo_count++;
+        if((analysed_histo_count>histos_to_analyse)&&(histos_to_analyse>0)) break;
         
         //only scale the axes AFTER calling PeakScan FIXME
         double xscaling = 1;
@@ -406,6 +555,7 @@ int main(int argc, const char* argv[]){
         // FIXME doesn't add the fit function...
 //        // write the histo to file, with prior fit function, for debug
 //        std::cout<<"Writing prior fit to file"<<std::endl;
+//        outfile->cd();
 //        thehist->Write(TString::Format("%s_prior",thehist->GetName()));
         
         // We may be able to speed up fitting by reducing tolerances or changing out integration strategy
@@ -459,6 +609,7 @@ int main(int argc, const char* argv[]){
         
         // write the fitted histo to file, with fit function
         std::cout<<"Writing to file"<<std::endl;
+        outfile->cd();
         thehist->Write(thehist->GetName());
         
         // copy it all into our ROOT file
@@ -491,6 +642,8 @@ int main(int argc, const char* argv[]){
         
     } // end loop over histograms in file
     
+    std::cout<<"We had "<<histos_with_a_peak<<" histograms that passed PeakScan in file "<<filename<<std::endl;
+    
     // Cleanup
     if(infile){
         std::cout<<"Closing input file"<<std::endl;
@@ -498,6 +651,10 @@ int main(int argc, const char* argv[]){
         delete infile;
         infile = nullptr;
     }
+    
+    } // end loop over input files
+    
+    // close ROOT file if we had one
     if(outfile){
         std::cout<<"Closing output file"<<std::endl;
         outfile->Write("",TObject::kOverwrite);
@@ -506,6 +663,11 @@ int main(int argc, const char* argv[]){
         delete outfile;
         outfile = nullptr;
     }
+    // close prescan output file if we had one
+    if(passingHistos.is_open()){
+        passingHistos.close();
+    }
+    
     std::cout<<"Deleting canvas"<<std::endl;
     if(gROOT->FindObject("c1")!=nullptr) delete c1;
     

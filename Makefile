@@ -5,8 +5,8 @@ LDFLAGS = `root-config --libs`
 
 all: deapfit deaplib
 
-deapfit: ./DEAP_fitting.cpp DEAPFitFunction.cpp DEAPFitFunction.h
-	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./DEAP_fitting.cpp DEAPFitFunction.cpp -o deapfit
+deapfit: ./DEAP_fitting.cpp DEAPFitFunction.cpp DEAPFitFunction.h sarge.cpp
+	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./DEAP_fitting.cpp DEAPFitFunction.cpp sarge.cpp -o deapfit
 
 makeplots: ./make_plots.cpp
 	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./make_plots.cpp -o makeplots

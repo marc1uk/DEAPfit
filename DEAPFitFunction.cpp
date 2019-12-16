@@ -101,8 +101,8 @@ void DEAPFitFunction::SetHisto(TH1* histo){
 	}
 	thehist = histo;
 	if(thehist->GetListOfFunctions()->GetSize()>0){
-		std::cerr<<"WARNING: DEAPFitFunction::SetHisto clears any functions "
-			 <<"owned by input histogram!"<<std::endl;
+		//std::cerr<<"WARNING: DEAPFitFunction::SetHisto clears any functions "
+		//	 <<"owned by input histogram!"<<std::endl;
 		thehist->GetListOfFunctions()->Clear();
 	}
 	SetRanges();
