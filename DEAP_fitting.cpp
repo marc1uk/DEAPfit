@@ -493,18 +493,31 @@ int main(int argc, const char* argv[]){
     
     // Cleanup
     if(infile){
+        std::cout<<"Closing input file"<<std::endl;
         infile->Close();
         delete infile;
         infile = nullptr;
     }
     if(outfile){
+        std::cout<<"Closing output file"<<std::endl;
         outfile->Write("",TObject::kOverwrite);
         outtree->ResetBranchAddresses();
         outfile->Close();
         delete outfile;
         outfile = nullptr;
     }
+    std::cout<<"Deleting canvas"<<std::endl;
+    if(gROOT->FindObject("c1")!=nullptr) delete c1;
     
-    delete FitApp;
+// gROOT maintains a list of all TF1s, and WILL DELETE THEM when it terminates.
+// If a DEAPFitFunction object creates some functions, and then tries to delete them when
+// it goes out of scope, it will segfault if the TApplication got there first.
+// So either you rely on your user ONLY creating DEAPFitFunction objects on the heap
+// so that you can call their destructor before terminating the TApplication,
+// or you let DEAPFitFunction leak memory and rely on there being a TApplication
+// to clean up later (i don't see why there necessarily will be one...)
+//    std::cout<<"Deleting TApplication"<<std::endl;
+//    if(FitApp) delete FitApp;   ...for now at least commenting this out works, though i don't know why, or if it will keep working
+    std::cout<<"done, goodbye"<<std::endl;
 }
 
