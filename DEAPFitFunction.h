@@ -21,6 +21,7 @@
 #include "TH1.h"
 #include "TF1.h"
 #include "TF1Convolution.h"
+#include "TFitResult.h"
 #include "TGraph.h"
 #include "TMath.h"
 #include "TROOT.h"
@@ -117,10 +118,10 @@ class DEAPFitFunction {
 	double GetMeanSPECharge();
 	
 	// Operators on the TF1
-	TF1* NameParameters(TF1* thefunc=nullptr);    // set names of parameters
-	void ConstructFunctions();                    // construct the TF1s needed by the FullFitFunction
-	TF1* MakeFullFitFunction();                   // construct TF1 internally. Do not delete the returned object!
-	int FitTheHisto();                            // call TH1::Fit with internal FullFitFunction
+	TF1* NameParameters(TF1* thefunc=nullptr);       // set names of parameters
+	void ConstructFunctions();                       // construct the TF1s needed by the FullFitFunction
+	TF1* MakeFullFitFunction();                      // construct TF1 internally. Do not delete the returned object!
+	TFitResultPtr FitTheHisto(std::string opts="");  // call TH1::Fit with internal FullFitFunction
 	
 	private:
 	// misc variables

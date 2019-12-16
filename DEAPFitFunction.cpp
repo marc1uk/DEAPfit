@@ -735,9 +735,10 @@ double DEAPFitFunction::GetYscaling(){
 	return yscaling;
 }
 
-int DEAPFitFunction::FitTheHisto(){
-	int fitresult = thehist->Fit(full_fit_func);   // 0 means sucess. Other values... mean something.
-	SetParameters(full_fit_func->GetParameters()); // update the internal members with the fit results
+TFitResultPtr DEAPFitFunction::FitTheHisto(std::string opts){
+	if(opts.find("S") == std::string::npos){ opts.push_back('S'); }
+	TFitResultPtr fitresult = thehist->Fit(full_fit_func, opts.c_str());  // 0 means sucess.
+	SetParameters(full_fit_func->GetParameters());     // update the internal members with the fit results
 	return fitresult;
 }
 

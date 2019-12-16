@@ -23,6 +23,7 @@
 #include "TH1.h"
 #include "TF1.h"
 #include "TF1Convolution.h"
+#include "TFitResult.h"
 #include "TGraph.h"
 #include "TMath.h"
 #include "TROOT.h"
@@ -566,11 +567,13 @@ int main(int argc, const char* argv[]){
             // Try to do the fit
             std::cout<<"Fitting"<<std::endl;
             auto tstart = std::chrono::high_resolution_clock::now();
-            int fit_success = deapfitter.FitTheHisto();
+            TFitResultPtr fit_result = deapfitter.FitTheHisto("S");
+            int fit_success = int(fit_result);
             auto tend = std::chrono::high_resolution_clock::now();
             double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(tend-tstart).count();
             time_taken *= 1e-9; // nano seconds to seconds
             std::cout<<"Fitting took "<<time_taken<<" sec"<<std::endl;
+            std::cout<<"Fitting required: "<<fit_result->NCalls()<<" function calls"<<std::endl;
             std::cout<<"Fit returned: "<<fit_success<<" for histogram "<<thehist->GetName()<<std::endl;
             
             // get the fit parameters
