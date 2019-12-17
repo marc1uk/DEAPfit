@@ -562,7 +562,9 @@ int main(int argc, const char* argv[]){
             // We may be able to speed up fitting by reducing tolerances or changing out integration strategy
             // from https://root-forum.cern.ch/t/speeding-up-fitting-to-a-landau-distribution/25140/2
             //ROOT::Math::MinimizerOptions::SetDefaultStrategy(0);
-            //ROOT::Math::MinimizerOptions::SetDefaultTolerance(10);
+            //ROOT::Math::MinimizerOptions::SetDefaultTolerance(0.0001);
+            //ROOT::Math::MinimizerOptions::SetDefaultMaxIterations(100);
+            //ROOT::Math::MinimizerOptions::SetDefaultMaxFunctionCalls(100);
             
             // Try to do the fit
             std::cout<<"Fitting"<<std::endl;

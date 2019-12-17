@@ -285,23 +285,6 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// noticable discontinuity, so back it off a lot to 10 or even 5
 	// (the rest can be filled in by the secondary Gamma)
 	
-	// load into a vector for returning or passing to the internal TF1
-	std::vector<double> fit_parameters(14);
-	fit_parameters.at(0) = prescaling;
-	fit_parameters.at(1) = ped_scaling;
-	fit_parameters.at(2) = ped_mean;
-	fit_parameters.at(3) = ped_sigma;
-	fit_parameters.at(4) = spe_firstgamma_scaling;
-	fit_parameters.at(5) = spe_firstgamma_mean;
-	fit_parameters.at(6) = spe_firstgamma_shape;
-	fit_parameters.at(7) = spe_secondgamma_scaling;
-	fit_parameters.at(8) = spe_secondgamma_mean_scaling;
-	fit_parameters.at(9) = spe_secondgamma_shape_scaling;
-	fit_parameters.at(10) = spe_expl_scaling;
-	fit_parameters.at(11) = spe_expl_charge_scaling;
-	fit_parameters.at(12) = mean_npe;
-	fit_parameters.at(13) = max_pes;
-	
 	// build the vector of fit parameter ranges
 	// prescaling
 	fit_parameter_ranges.resize(14);
@@ -333,31 +316,26 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// max npes
 	fit_parameter_ranges.at(13) = std::pair<double,double>{1,5};
 	
-	// assume that if we have an internal fit function, we wish to set these as priors
-	if(full_fit_func!=nullptr){
-		std::cout<<"Setting parameter priors"<<std::endl;
-		full_fit_func->SetParameters(fit_parameters.data());
-		for(int pari=0; pari<fit_parameter_ranges.size(); pari++){
-			full_fit_func->SetParLimits(pari,
-						    fit_parameter_ranges.at(pari).first,
-						    fit_parameter_ranges.at(pari).second);
-		}
-		// print just to check and for info
-		std::cout<<"Piors and their limits are:"<<std::endl;
-		for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
-			double lbound, ubound, value;
-			full_fit_func->GetParLimits(pari,lbound,ubound);
-			value = full_fit_func->GetParameter(pari);
-			std::string parname = full_fit_func->GetParName(pari);
-			std::cout<<pari<<": ("<<parname<<") "<<lbound<<" < "<<value<<" < "<<ubound<<std::endl;
-		}
-		std::cout<<std::endl;
+	// print just to check and for info
+	std::cout<<"Piors and their limits are:"<<std::endl;
+	for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
+		double lbound, ubound, value;
+		full_fit_func->GetParLimits(pari,lbound,ubound);
+		value = full_fit_func->GetParameter(pari);
+		std::string parname = full_fit_func->GetParName(pari);
+		std::cout<<pari<<": ("<<parname<<") "<<lbound<<" < "<<value<<" < "<<ubound<<std::endl;
 	}
-	// update the internal TF1s
+	std::cout<<std::endl;
+	
+	// assume that if we have an internal fit function, we wish to set these as priors
+	std::cout<<"Setting parameter priors"<<std::endl;
 	RefreshParameters();
 	
+	// update internal TF1 limits
+	SetParameterLimits(fit_parameter_ranges);
+	
 	// update the user's vector
-	if(fit_pars!=nullptr) *fit_pars = fit_parameters;
+	if(fit_pars!=nullptr) *fit_pars = GetParameters();
 	// update the user's limits
 	if(par_limits!=nullptr) *par_limits = fit_parameter_ranges;
 	
@@ -573,7 +551,8 @@ int DEAPFitFunction::SetParameters(std::vector<double> fit_parameters){
 			 <<"Expected 13 (14 including max_npes), got "<<fit_parameters.size()<<std::endl
 			 <<"Only parameters up to the first 13 (14) will be used"<<std::endl;
 	}
-	if(full_fit_func!=nullptr) full_fit_func->SetParameters(fit_parameters.data());
+	
+	// update the internal TF1s
 	RefreshParameters();
 	return 1;
 }
@@ -595,8 +574,7 @@ void DEAPFitFunction::SetParameters(double* fit_parameters){
 	mean_npe = fit_parameters[12];
 	//max_pes = fit_parameters[13];  // better to assume we're not using it, since we can't tell
 	
-	// update the internal TF1 if we have one
-	if(full_fit_func!=nullptr) full_fit_func->SetParameters(fit_parameters);
+	// update the internal TF1s
 	RefreshParameters();
 }
 
@@ -695,7 +673,29 @@ void DEAPFitFunction::RefreshParameters(){
 	// pass into functions - these are the parameters of the internal functions to the TF1Convolutions
 	for(TF1* apefunc : npe_funcs){
 		apefunc->SetParameters(NPE_pars.data());
-		//apefunc->SetNormalized(true);
+	}
+	
+	// pass into the full fit function
+	if(full_fit_func!=nullptr){
+		// load into a vector for returning or passing to the internal TF1
+		// (we need to use a vector because SetParameter(X,value) only allows
+		// setting up to 12 parameters at most
+		std::vector<double> fit_parameters(14);
+		fit_parameters.at(0) = prescaling;
+		fit_parameters.at(1) = ped_scaling;
+		fit_parameters.at(2) = ped_mean;
+		fit_parameters.at(3) = ped_sigma;
+		fit_parameters.at(4) = spe_firstgamma_scaling;
+		fit_parameters.at(5) = spe_firstgamma_mean;
+		fit_parameters.at(6) = spe_firstgamma_shape;
+		fit_parameters.at(7) = spe_secondgamma_scaling;
+		fit_parameters.at(8) = spe_secondgamma_mean_scaling;
+		fit_parameters.at(9) = spe_secondgamma_shape_scaling;
+		fit_parameters.at(10) = spe_expl_scaling;
+		fit_parameters.at(11) = spe_expl_charge_scaling;
+		fit_parameters.at(12) = mean_npe;
+		fit_parameters.at(13) = max_pes;
+		full_fit_func->SetParameters(fit_parameters.data());
 	}
 }
 
@@ -915,7 +915,20 @@ double DEAPFitFunction::FullFitFunction(double* x, double* all_pars){
 	// because we can't properly normalize the internals of TF1Convolution,
 	// compensate for it by calculating the internal scaling owing from the convolutions
 	spe_func->SetParameters(spe_pars);
-	double spe_integral = spe_func->Integral(histogram_minimum,histogram_maximum);
+	double rel_tolerance = 0.0001; // default 1.e-12.
+	double spe_integral = spe_func->Integral(histogram_minimum,histogram_maximum,rel_tolerance);
+	/* Lowering the relative tolerance probably speeds it up, and suppresses GSL warnings:
+	Error in <GSLError>: Error 18 in qags.c at 548 : cannot reach tolerance because of roundoff error
+	Warning in <TF1::IntegralOneDim>: Error found in integrating function spe_func ...
+	*/
+	
+//	// it may be quicker to use IntegralFast?
+//	// not sure under what circumstances the GaussLegendreSamplingPoints need to be recalculated though...
+//	Int_t np = 1000;
+//	double *x=new double[np]; these would need to be moved outside so we don't leak memory
+//	double *w=new double[np];
+//	spe_func->CalcGaussLegendreSamplingPoints(np,x,w,rel_tolerance); // 0 is params pointer (default 0)
+//	double spe_integral = spe_func->IntegralFast(np,x,w,histogram_minimum,histogram_maximum);
 	
 	double running_npe_contribution=0;
 	// loop over the NPE peaks
