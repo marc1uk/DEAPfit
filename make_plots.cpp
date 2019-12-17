@@ -15,16 +15,23 @@
 #include "TSystem.h"
 #include "TKey.h"
 
-int main(){
+int main(int argc, const char* argv[]){
     // make the TApplication for drawing
     //int myargc = 1;
     //char arg1[] = "potato";
     //char* myargv[]={arg1};
     //TApplication *PlotApp = new TApplication("PlotApp",&myargc,myargv);
 
-    std::string filenamebase = "LEDRun1178S0LEDs5And6And10And28_PulseWindowOnly_PMTStability_Run0";
+    //std::string filenamebase = "LEDRun1178S0LEDs5And6And10And28_PulseWindowOnly_PMTStability_Run0";
+    std::string filenamebase = "DEAPfitter_outfile";
+    if(argc>1) filenamebase = argv[1];
+    if(  (filenamebase.find_last_of(".") != std::string::npos) &&
+         (! ((filenamebase.find_last_of(".")==1)&&(filenamebase.find_first_of('.')==0)) )){
+        filenamebase = filenamebase.substr(0, filenamebase.find_last_of('.'));
+    }
     std::string outputfilename = filenamebase+"_fitted.pdf";
-    int num_jobs = 14; // how many files did we split the results into - how many grid jobs processed the fits?
+    int num_jobs = 1; // how many files did we split the results into - how many grid jobs processed the fits?
+    if(argc>2) num_jobs = atoi(argv[2]);
     // loop over jobs
     std::map<int,TFile*> thefiles; // use a map as some jobs may potentially have not have produced an output file
     std::map<int,TH1*> thehistos;

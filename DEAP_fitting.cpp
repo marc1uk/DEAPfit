@@ -32,7 +32,7 @@
 #include "TKey.h"
 #include "TTimer.h"
 //#include "Math/MinimizerOptions.h"
-//#include "TVirtualFitter.h"
+#include "TVirtualFitter.h"
 
 #include "DEAPFitFunction.h"
 #include "sarge.h"
@@ -565,11 +565,25 @@ int main(int argc, const char* argv[]){
             //ROOT::Math::MinimizerOptions::SetDefaultStrategy(0);
             //ROOT::Math::MinimizerOptions::SetDefaultMaxIterations(100);
             //ROOT::Math::MinimizerOptions::SetDefaultMaxFunctionCalls(100);
-            //TVirtualFitter::SetMaxIterations(100);
-            //TVirtualFitter::SetPrecision(0.01);
             //ROOT::Math::MinimizerOptions::SetDefaultTolerance(0.1);
-            //ROOT::Math::MinimizerOptions::SetDefaultMinimizer("Minuit2"); // potentially fit multiple histos @ once?
-            //gSystem->Load("libMinuit2");
+            // The above didn't seem to work, using TVirtualFitter did, but only on gpvm (ROOT 6.18),
+            // not my laptop (ROOT 6.06)
+            // Limiting max iterations does seem to limit maximum fitting time,
+            // although the default (5000) should not have resulted in job hangs...
+            // If MaxIterations is too low, the fitter may break early, thinking it's reached tolerance!
+            // The returned EDM is incorrect!
+            // Maybe it overruns by a certain % to check it's found the global min?
+            // Bear this in mind when balaning MaxIterations vs EDM:
+            // MaxIterations needs a suitable buffer above what seems necesary!
+            // Maybe lowering the EDM more could also help protect against terminating at false minima...
+            TVirtualFitter::SetMaxIterations(3000); // 2000 seems sufficient at a brief scan, allow more
+            std::cout<<"Using at most "<<TVirtualFitter::GetMaxIterations()<<" fitting iterations"<<std::endl;
+            TVirtualFitter::SetPrecision(10);  // 0.001 default, 20 seems sufficient.
+            std::cout<<"Using a fit tolerance of "<<TVirtualFitter::GetPrecision()<<std::endl;
+            // dunno if it helps, but it doesn't seem to hurt
+            // Minuit2 is thread-safe so we could potentially fit multiple histos @ once...
+            ROOT::Math::MinimizerOptions::SetDefaultMinimizer("Minuit2");
+            gSystem->Load("libMinuit2");
             
             // Try to do the fit
             std::cout<<"Fitting"<<std::endl;
