@@ -160,6 +160,7 @@ int main(int argc, const char* argv[]){
     int Voltage=0;
     int file_detectorkey;
     int file_fit_success;
+    double file_fit_chi2;
     double file_prescaling;
     double file_ped_scaling;
     double file_ped_mean;
@@ -218,6 +219,7 @@ int main(int argc, const char* argv[]){
         TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
         TBranch* bVoltage = outtree->Branch("Voltage",&Voltage);
         TBranch* bfit_success = outtree->Branch("fit_success", &file_fit_success);
+        TBranch* bfit_chi2 = outtree->Branch("fit_chi2", &file_fit_chi2);
         TBranch* bprescaling = outtree->Branch("prescaling", &file_prescaling);
         TBranch* bped_scaling = outtree->Branch("ped_scaling", &file_ped_scaling);
         TBranch* bped_mean = outtree->Branch("ped_mean", &file_ped_mean);
@@ -578,7 +580,7 @@ int main(int argc, const char* argv[]){
             // Maybe lowering the EDM more could also help protect against terminating at false minima...
             TVirtualFitter::SetMaxIterations(3000); // 2000 seems sufficient at a brief scan, allow more
             std::cout<<"Using at most "<<TVirtualFitter::GetMaxIterations()<<" fitting iterations"<<std::endl;
-            TVirtualFitter::SetPrecision(10);  // 0.001 default, 20 seems sufficient.
+            TVirtualFitter::SetPrecision(1);  // 0.001 default, 20 seems sufficient...mostly. bad histograms fit badly.
             std::cout<<"Using a fit tolerance of "<<TVirtualFitter::GetPrecision()<<std::endl;
             // dunno if it helps, but it doesn't seem to hurt
             // Minuit2 is thread-safe so we could potentially fit multiple histos @ once...
@@ -590,12 +592,14 @@ int main(int argc, const char* argv[]){
             auto tstart = std::chrono::high_resolution_clock::now();
             TFitResultPtr fit_result = deapfitter.FitTheHisto("S");
             int fit_success = int(fit_result);
+            double fit_chi2 = fit_result->Chi2();
             auto tend = std::chrono::high_resolution_clock::now();
             double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(tend-tstart).count();
             time_taken *= 1e-9; // nano seconds to seconds
             std::cout<<"Fitting took "<<time_taken<<" sec"<<std::endl;
             std::cout<<"Fitting required: "<<fit_result->NCalls()<<" function calls"<<std::endl;
             std::cout<<"Fit returned: "<<fit_success<<" for histogram "<<thehist->GetName()<<std::endl;
+            std::cout<<"Fit chi2 was: "<<fit_chi2<<std::endl;
             
             // get the fit parameters
             fit_parameters = deapfitter.GetParameters();
@@ -639,6 +643,7 @@ int main(int argc, const char* argv[]){
             // copy it all into our ROOT file
             file_detectorkey = detkey;
             file_fit_success = fit_success;
+            file_fit_chi2 = fit_chi2;
             file_prescaling = fit_parameters.at(0);
             file_ped_scaling = fit_parameters.at(1);
             file_ped_mean = fit_parameters.at(2);
