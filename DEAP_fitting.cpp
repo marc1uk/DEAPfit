@@ -73,7 +73,7 @@ int main(int argc, const char* argv[]){
         return 1;
     }
     
-    if(sarge.exists("help")){ sarge.printHelp(); }
+    if(sarge.exists("help")){ sarge.printHelp(); return 0; }
     
     // get the type of input file
     // this is used to determine the x-axis units, and scaling required to put in pC
@@ -159,6 +159,8 @@ int main(int argc, const char* argv[]){
     int SubRun=0;
     int Voltage=0;
     int file_detectorkey;
+    int file_just_gaussian;
+    int file_found_spe_peak;
     int file_fit_success;
     double file_fit_chi2;
     double file_prescaling;
@@ -202,7 +204,6 @@ int main(int argc, const char* argv[]){
     int file_max2;
     int file_peaktovalleymin;
     int file_intermin;
-    bool file_spe_peak_found;
     double file_yscaling;
 #endif
     
@@ -218,7 +219,9 @@ int main(int argc, const char* argv[]){
         TBranch* bRunNum = outtree->Branch("Run",&RunNum);
         TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
         TBranch* bVoltage = outtree->Branch("Voltage",&Voltage);
-        TBranch* bfit_success = outtree->Branch("fit_success", &file_fit_success);
+        TBranch* bjust_gaussian = outtree->Branch("just_gaussian", &file_just_gaussian);
+        TBranch* bfound_spe_peak = outtree->Branch("found_spe_peak", &file_found_spe_peak);
+        TBranch* bfit_success = outtree->Branch("fit_result", &file_fit_success);
         TBranch* bfit_chi2 = outtree->Branch("fit_chi2", &file_fit_chi2);
         TBranch* bprescaling = outtree->Branch("prescaling", &file_prescaling);
         TBranch* bped_scaling = outtree->Branch("ped_scaling", &file_ped_scaling);
@@ -266,7 +269,6 @@ int main(int argc, const char* argv[]){
         TBranch* bmax2 = outtree->Branch("max2", &file_max2);
         TBranch* bpeaktovalleymin = outtree->Branch("peaktovalleymin", &file_peaktovalleymin);
         TBranch* bintermin = outtree->Branch("intermin", &file_intermin);
-        TBranch* bspe_peak_found = outtree->Branch("spe_peak_found", &file_spe_peak_found);
         TBranch* byscaling = outtree->Branch("scaling", &file_yscaling);
 #endif // STORE_DEBUG_EXTRAS
         // OK, file made
@@ -431,44 +433,162 @@ int main(int argc, const char* argv[]){
             thehist = ahisto.second;
             if(thehist==nullptr){ std::cerr<<"No hist"<<std::endl; return 0; }
             
-            if(precut==0){
-                // offset and histos_to_analyse should consider all histograms, not just those passing PeakScan
+            if(precut==0){ // offset & histos_to_analyse consider ALL histograms, not just those viable for fit
+                // in this case increment our current histo index and skip if less than our starting index
                 if(offsetcount<offset){
                     ++offsetcount;
                     continue;
                 }
             }
             
-            // pass to the fitter
-            deapfitter.SetHisto(thehist);
-            deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
-            // ↑ FIXME for histos with a small number of bins TH1::Smooth ADDS valleys where there were none before!
+            // First Viability Check
+            // =====================
+            // matt's check for pedestal only histos:
+            // integrate a gaussian, of width equal to the typical baseline sigma, from mean + 1sigma upwards
+            // if <150 tag it as "empty"
+            bool just_gaussian=true;
+            // for the initial baseline 1-sigma, we need to do a gaussian fit.
+            // To try to fit only that pedestal gaussian and not be pulled out by any
+            // potential NPE peaks or extended tail, only fit from the peak out to
+            // the point where bin counts drop to 10% the maximum on either side.
+            // This is a little arbitrary, but hopefully will get the job done.
+            // 
+            // first find that fitting cutoff point
+            int maxbin = thehist->GetMaximumBin();
+            double maxbincount=thehist->GetBinContent(maxbin);
+            double rightthresh=0;
+            int rightthreshbin=0;
+            for(int bini=maxbin; bini<thehist->GetNbinsX(); ++bini){
+                double thisbincount = thehist->GetBinContent(bini);
+                if(thisbincount<(0.1*maxbincount)){
+                    //cout<<"break at "<<bini<<endl;
+                    rightthresh = thehist->GetBinCenter(bini);
+                    rightthreshbin = bini; // for later
+                    break;
+                }
+            }
+            double leftthresh=0;
+            for(int bini=maxbin; bini<thehist->GetNbinsX(); --bini){
+                double thisbincount = thehist->GetBinContent(bini);
+                if(thisbincount<(0.1*maxbincount)){
+                    //cout<<"break at "<<bini<<endl;
+                    leftthresh = thehist->GetBinCenter(bini);
+                    break;
+                }
+            }
+            // do the fit, hopefully fitting only the pedestal.
+            TF1* thegaus = new TF1("pedgaus", "gaus",leftthresh,rightthresh);
+            // "gaus" is [0]*exp(-0.5*((x-[1])/[2])**2) 
+            thegaus->SetNpx(2000);
+            thehist->Fit(thegaus,"RQN"); // function range, quiet, do not store
             
-            // Scan for a second peak after pedestal
-            std::vector<double> precheck_pars;
-            bool found_spe_peak = deapfitter.PeakScan(&precheck_pars);
-            if(not found_spe_peak) continue; // sorry, if we can't find a second bump, i can't generate suitable priors
+            // Now we want to see how much of the histogram is 'within' this fit
+            // and how much of it leaks out (i.e. any counts in potential NPE peaks).
+            // The tricky bit here is how to suitably measure the amount 'in' and 'out'.
+            // Number of counts are stats dependant. Percentage of total counts depdend on
+            // the mean number of pe's, and low % doesn't necessarily mean no peaks.
+            // 
+            // As a shot in the dark, i'm going to count how many bins have more than X entries,
+            // counting from the point where we leave the gaussian, until the first empty bin.
+            // Any reasonable binning should have an SPE peak that spans at least Y bins,
+            // (very coarse binning), while very fine binning should be unlikely to have X entries in
+            // Y consecutive bins from just noise (also cutting off at first 0 should help).
+            // I choose X = 5, Y = 10;
+            int PED_COUNT_THRESH=5; // bins must have at least this many counts to be included
+            int MIN_SPE_BINS=10;    // we must have this many such bins to suspect we have an SPE bump
+            // do the scan
+            int binsoutside=0;
+            // scan over bins, might as well start from RH edge of pedestal
+            for(int i=rightthreshbin; i<thehist->GetNbinsX(); ++i){
+                // check if we're 'outside' the gaussian yet.
+                // gonna do this by scaling the pedestal function up a bit, and checking if we're below it.
+                // this captures bins in the pedestal region, but cuts off very sharply at the pedestal edge
+                double binconts = thehist->GetBinContent(i);
+                double fitcounts = 10.*thegaus->Eval(thehist->GetBinCenter(i));
+                if(fitcounts>binconts) continue;  // still under the gaussian
+                else if(binconts==0) break;       // we've hit the floor
+                else if(binconts>PED_COUNT_THRESH) binsoutside++;  // another valid bin outside
+                if(binsoutside>MIN_SPE_BINS){ // if we have enough bins with something in
+                    just_gaussian=false;          // move to the next stage of viability checks
+                    break;
+                }
+            }
+            delete thegaus;
             
-            histos_with_a_peak++;
-            if(prescan_only){
-                // if just counting viable histograms, print details, increase count in this file and continue
-                std::cout<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
-                passingHistos<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
-                continue;
+            // Second Viability Check
+            // ======================
+            // if we have enough bins to work with, try to find a peak & valley in them
+            bool found_spe_peak=false;
+            std::vector<double> precheck_pars; // access to PeakScan results if we pass the scan
+            if(not just_gaussian){
+                // pass to the fitter
+                deapfitter.SetHisto(thehist);
+                deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
+                // ↑ FIXME for histos with a small number of bins TH1::Smooth ADDS valleys!
+                // hopefully these are filtered out by the previous scan....
+                
+                // Scan for a second peak after pedestal
+                found_spe_peak = deapfitter.PeakScan(&precheck_pars);
             }
             
-            // skip until requested histo
+            // update our counter of viable histograms if it passes both pre-test checks
+            if(found_spe_peak){
+                histos_with_a_peak++;
+                // if all we're doing is counting viable histograms, we can move on
+                if(prescan_only){
+                    // if just counting viable histograms, print details, increase count in this file and continue
+                    std::cout<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+                    passingHistos<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+                    continue;
+                }
+            }
+            
+            // having updated our count of viable histograms, check if we've hit our start point yet
             if(precut){
-                // offset and histos_to_analyse should only count histograms after they've passed PeakScan
+                // in this case offset & histos_to_analyse only count histograms after they've passed PeakScan
                 if(offsetcount<offset){
                     ++offsetcount;
                     continue;
                 }
             }
-            analysed_histo_count++;
-            if((analysed_histo_count>histos_to_analyse)&&(histos_to_analyse>0)) break;
             
-            //only scale the axes AFTER calling PeakScan FIXME
+            // if we *didn't* pass both our pre-flight checks, but we *are* supposed to analyse this histo,
+            // write the histo and TTree entry to file before moving on
+            if(not found_spe_peak){
+                // save histograms we skip, so we have a complete set and we can see what we missed
+                outfile->cd();
+                thehist->Write(thehist->GetName());
+                
+                // write an appropriate entry to the ROOT tree
+                file_detectorkey = detkey;
+                file_just_gaussian = just_gaussian;
+                file_found_spe_peak = found_spe_peak;
+                file_fit_success = false;
+                file_prescaling = 0;
+                file_ped_scaling = 0;
+                file_ped_mean = 0;
+                file_ped_sigma = 0;
+                file_spe_firstgamma_scaling = 0;
+                file_spe_firstgamma_mean = 0;
+                file_spe_firstgamma_shape = 0;
+                file_spe_secondgamma_scaling = 0;
+                file_spe_secondgamma_mean_scaling = 0;
+                file_spe_secondgamma_shape_scaling = 0;
+                file_spe_expl_scaling = 0;
+                file_spe_expl_charge_scaling = 0;
+                file_mean_npe = 0;
+                file_max_pes = 0;
+                file_mean_spe_charge = 0;
+                file_gain = 0;
+                file_spe_firstgamma_gain = 0;
+                
+                outtree->Fill();
+                outtree->Write("fit_parameters",TObject::kOverwrite);
+                
+                continue; // sorry, if we can't find a second bump, i can't generate suitable priors
+            }
+            
+            //only scale the axes AFTER calling PeakScan (PeakScan should be count-independent: FIXME)
             double xscaling = 1;
             if(filesourcestring=="ToolAnalysis"){
                 // for these files the histograms are in nC
@@ -519,7 +639,6 @@ int main(int argc, const char* argv[]){
             file_interpos = precheck_pars.at(4);
             file_intermin = precheck_pars.at(5);
             file_peaktovalleymin = precheck_pars.at(6);
-            file_spe_peak_found = found_spe_peak;
             file_yscaling = deapfitter.GetYscaling();
 #endif
             
@@ -580,7 +699,7 @@ int main(int argc, const char* argv[]){
             // Maybe lowering the EDM more could also help protect against terminating at false minima...
             TVirtualFitter::SetMaxIterations(3000); // 2000 seems sufficient at a brief scan, allow more
             std::cout<<"Using at most "<<TVirtualFitter::GetMaxIterations()<<" fitting iterations"<<std::endl;
-            TVirtualFitter::SetPrecision(1);  // 0.001 default, 20 seems sufficient...mostly. bad histograms fit badly.
+            TVirtualFitter::SetPrecision(0.1);  // 0.001 default, 20 seems sufficient...mostly. bad histograms fit badly.
             std::cout<<"Using a fit tolerance of "<<TVirtualFitter::GetPrecision()<<std::endl;
             // dunno if it helps, but it doesn't seem to hurt
             // Minuit2 is thread-safe so we could potentially fit multiple histos @ once...
@@ -642,6 +761,8 @@ int main(int argc, const char* argv[]){
             
             // copy it all into our ROOT file
             file_detectorkey = detkey;
+            file_just_gaussian = just_gaussian;
+            file_found_spe_peak = found_spe_peak;
             file_fit_success = fit_success;
             file_fit_chi2 = fit_chi2;
             file_prescaling = fit_parameters.at(0);
@@ -667,6 +788,10 @@ int main(int argc, const char* argv[]){
             outtree->Fill();
             outtree->Write("fit_parameters",TObject::kOverwrite);
             
+            // increment the counter of how many histograms we've fitted, and break if this is to be our last
+            analysed_histo_count++;
+            if(((analysed_histo_count+1)>histos_to_analyse)&&(histos_to_analyse>0)) break;
+            
             //break; // XXX DEBUG so we can check
             
         } // end loop over histograms in file
@@ -686,7 +811,7 @@ int main(int argc, const char* argv[]){
     // close ROOT file if we had one
     if(outfile){
         std::cout<<"Closing output file"<<std::endl;
-        outfile->Write("",TObject::kOverwrite);
+        //outfile->Write("",TObject::kOverwrite);
         outtree->ResetBranchAddresses();
         outfile->Close();
         delete outfile;
