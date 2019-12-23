@@ -180,6 +180,9 @@ int main(int argc, const char* argv[]){
     double file_mean_spe_charge;
     double file_gain;
     double file_spe_firstgamma_gain; // for reference...
+    // TODO: Add error on gain fit parameter.
+    // should be able to retrieve this from the TFitResultPtr
+    
 #ifdef STORE_PRIORS
     double file_prescaling_prior;
     double file_ped_scaling_prior;
