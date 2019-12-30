@@ -180,8 +180,7 @@ int main(int argc, const char* argv[]){
     double file_mean_spe_charge;
     double file_gain;
     double file_spe_firstgamma_gain; // for reference...
-    // TODO: Add error on gain fit parameter.
-    // should be able to retrieve this from the TFitResultPtr
+    double file_gain_error;
     
 #ifdef STORE_PRIORS
     double file_prescaling_prior;
@@ -244,6 +243,7 @@ int main(int argc, const char* argv[]){
         // the money numbers
         TBranch* bmean_spe_charge = outtree->Branch("mean_spe_charge", &file_mean_spe_charge);
         TBranch* bgain = outtree->Branch("gain", &file_gain);
+        TBranch* bgain_error = outtree->Branch("gain_error", &file_gain_error);
         TBranch* bspe_firstgamma_gain = outtree->Branch("spe_firstgamma_gain", &file_spe_firstgamma_gain);
         
         // also store all our priors for debug
@@ -583,6 +583,7 @@ int main(int argc, const char* argv[]){
                 file_max_pes = 0;
                 file_mean_spe_charge = 0;
                 file_gain = 0;
+                file_gain_error = 0;
                 file_spe_firstgamma_gain = 0;
                 
                 outtree->Fill();
@@ -786,6 +787,12 @@ int main(int argc, const char* argv[]){
             // Extract gain
             file_mean_spe_charge = deapfitter.GetMeanSPECharge();
             file_gain = (file_mean_spe_charge-file_ped_mean)/ELECTRON_CHARGE_IN_PICOCOULOMBS;
+            double ped_pos_error = fit_result->GetErrors()[2];
+            double spe_pos_error = fit_result->GetErrors()[5]; // not quite correct
+            // the spe pos is taken as the mean of the entire SPE TF1, including 2 gaussians and an exponential part
+            // the error on the histogram mean is perhaps not exactly the mean on the main gaussian mean...
+            // but it's probably good enough
+            file_gain_error = sqrt(pow(ped_pos_error,2.)+pow(spe_pos_error,2.))/ELECTRON_CHARGE_IN_PICOCOULOMBS;
             file_spe_firstgamma_gain = (file_spe_firstgamma_mean-file_ped_mean)/ELECTRON_CHARGE_IN_PICOCOULOMBS;
             
             outtree->Fill();
@@ -814,7 +821,7 @@ int main(int argc, const char* argv[]){
     // close ROOT file if we had one
     if(outfile){
         std::cout<<"Closing output file"<<std::endl;
-        //outfile->Write("",TObject::kOverwrite);
+        outfile->Write(); // write header of TFile, necessary even if all objects had Write called... maybe?
         outtree->ResetBranchAddresses();
         outfile->Close();
         delete outfile;

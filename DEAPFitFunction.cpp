@@ -316,6 +316,10 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// max npes
 	fit_parameter_ranges.at(13) = std::pair<double,double>{1,5};
 	
+	// assume that if we have an internal fit function, we wish to set these as priors
+	std::cout<<"Setting parameter priors"<<std::endl;
+	RefreshParameters();
+	
 	// print just to check and for info
 	std::cout<<"Piors and their limits are:"<<std::endl;
 	for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
@@ -326,10 +330,6 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		std::cout<<pari<<": ("<<parname<<") "<<lbound<<" < "<<value<<" < "<<ubound<<std::endl;
 	}
 	std::cout<<std::endl;
-	
-	// assume that if we have an internal fit function, we wish to set these as priors
-	std::cout<<"Setting parameter priors"<<std::endl;
-	RefreshParameters();
 	
 	// update internal TF1 limits
 	SetParameterLimits(fit_parameter_ranges);
