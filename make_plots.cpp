@@ -113,11 +113,14 @@ int main(int argc, const char* argv[]){
     }
     
     for(int pagei=0; pagei<canvases.size(); pagei++){
-      std::cout << "WE HERE " << std::endl;
-      TString ofname = "charge_dists_";
-      ofname+=pagei;
-      ofname+=".pdf";
-      canvases.at(pagei)->SaveAs(ofname);
+      // write each page as a separate file
+      //std::cout << "WE HERE " << std::endl;
+      //TString ofname = "charge_dists_";
+      //ofname+=pagei;
+      //ofname+=".pdf";
+      //canvases.at(pagei)->SaveAs(ofname);
+      // 
+      // combine all pages into a single file
       if(pagei==0){
         canvases.at(pagei)->Print((outputfilename+"(").c_str(),TString::Format("Title:%d",pagei));
       } else if((pagei+1)==canvases.size()){

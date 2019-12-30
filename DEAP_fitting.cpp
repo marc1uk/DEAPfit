@@ -435,6 +435,8 @@ int main(int argc, const char* argv[]){
             int detkey = ahisto.first;
             thehist = ahisto.second;
             if(thehist==nullptr){ std::cerr<<"No hist"<<std::endl; return 0; }
+            std::string histname = thehist->GetName();
+            histname += std::to_string(Voltage);
             
             if(precut==0){ // offset & histos_to_analyse consider ALL histograms, not just those viable for fit
                 // in this case increment our current histo index and skip if less than our starting index
@@ -481,7 +483,7 @@ int main(int argc, const char* argv[]){
             }
             // do the fit, hopefully fitting only the pedestal.
             TF1* thegaus = new TF1("pedgaus", "gaus",leftthresh,rightthresh);
-            // "gaus" is [0]*exp(-0.5*((x-[1])/[2])**2) 
+            // "gaus" is [0]*exp(-0.5*((x-[1])/[2])**2)
             thegaus->SetNpx(2000);
             thehist->Fit(thegaus,"RQN"); // function range, quiet, do not store
             
@@ -517,6 +519,7 @@ int main(int argc, const char* argv[]){
                 }
             }
             delete thegaus;
+            thehist->GetListOfFunctions()->Clear();
             
             // Second Viability Check
             // ======================
@@ -560,7 +563,7 @@ int main(int argc, const char* argv[]){
             if(not found_spe_peak){
                 // save histograms we skip, so we have a complete set and we can see what we missed
                 outfile->cd();
-                thehist->Write(thehist->GetName());
+                thehist->Write(histname.c_str());
                 
                 // write an appropriate entry to the ROOT tree
                 file_detectorkey = detkey;
@@ -683,7 +686,7 @@ int main(int argc, const char* argv[]){
 //            // write the histo to file, with prior fit function, for debug
 //            std::cout<<"Writing prior fit to file"<<std::endl;
 //            outfile->cd();
-//            thehist->Write(TString::Format("%s_prior",thehist->GetName()));
+//            thehist->Write(TString::Format("%s_prior",histname));
             
             // We may be able to speed up fitting by reducing tolerances or changing out integration strategy
             // from https://root-forum.cern.ch/t/speeding-up-fitting-to-a-landau-distribution/25140/2
@@ -703,15 +706,17 @@ int main(int argc, const char* argv[]){
             // Maybe lowering the EDM more could also help protect against terminating at false minima...
             TVirtualFitter::SetMaxIterations(3000); // 2000 seems sufficient at a brief scan, allow more
             std::cout<<"Using at most "<<TVirtualFitter::GetMaxIterations()<<" fitting iterations"<<std::endl;
-            TVirtualFitter::SetPrecision(0.1);  // 0.001 default, 20 seems sufficient...mostly. bad histograms fit badly.
+            TVirtualFitter::SetPrecision(0.5);  // 0.001 default, 20 seems sufficient...mostly. bad histograms fit badly.
             std::cout<<"Using a fit tolerance of "<<TVirtualFitter::GetPrecision()<<std::endl;
-            // dunno if it helps, but it doesn't seem to hurt
             // Minuit2 is thread-safe so we could potentially fit multiple histos @ once...
-            ROOT::Math::MinimizerOptions::SetDefaultMinimizer("Minuit2");
-            gSystem->Load("libMinuit2");
+            //ROOT::Math::MinimizerOptions::SetDefaultMinimizer("Minuit2");
+            //gSystem->Load("libMinuit2");
+            // seemed like Minuit2 was failing an assertion in some cases:
+            // e.g. Fitting histogram hist_charge_332 from file R1217S0_1400V_PMTStability_Run0.root
+            //deapfit: /scratch/workspace/canvas-products/BUILDTYPE/debug/QUAL/e17/label1/swarm/label2/SLF6/build/root/v6_18_04b/source/root-6.18.04/math/minuit2/src/VariableMetricBuilder.cxx:267: ROOT::Minuit2::FunctionMinimum ROOT::Minuit2::VariableMetricBuilder::Minimum(const ROOT::Minuit2::MnFcn&, const ROOT::Minuit2::GradientCalculator&, const ROOT::Minuit2::MinimumSeed&, std::vector<ROOT::Minuit2::MinimumState>&, unsigned int, double) const: Assertion `s0.IsValid()' failed.
             
             // Try to do the fit
-            std::cout<<"Fitting"<<std::endl;
+            std::cout<<"Fitting histogram "<<thehist->GetName()<<" from file "<<filename<<std::endl;
             auto tstart = std::chrono::high_resolution_clock::now();
             TFitResultPtr fit_result = deapfitter.FitTheHisto("S");
             int fit_success = int(fit_result);
@@ -721,7 +726,7 @@ int main(int argc, const char* argv[]){
             time_taken *= 1e-9; // nano seconds to seconds
             std::cout<<"Fitting took "<<time_taken<<" sec"<<std::endl;
             std::cout<<"Fitting required: "<<fit_result->NCalls()<<" function calls"<<std::endl;
-            std::cout<<"Fit returned: "<<fit_success<<" for histogram "<<thehist->GetName()<<std::endl;
+            std::cout<<"Fit returned: "<<fit_success<<" for histogram "<<histname<<std::endl;
             std::cout<<"Fit chi2 was: "<<fit_chi2<<std::endl;
             
             // get the fit parameters
@@ -761,7 +766,7 @@ int main(int argc, const char* argv[]){
             // write the fitted histo to file, with fit function
             std::cout<<"Writing to file"<<std::endl;
             outfile->cd();
-            thehist->Write(thehist->GetName());
+            thehist->Write(histname.c_str());
             
             // copy it all into our ROOT file
             file_detectorkey = detkey;

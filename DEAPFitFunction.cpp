@@ -290,7 +290,7 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	fit_parameter_ranges.resize(14);
 	fit_parameter_ranges.at(0) = std::pair<double,double>{0,0};              // no constraints
 	// pedestal amplitude
-	fit_parameter_ranges.at(1) = std::pair<double,double>{0,max_bin_count};
+	fit_parameter_ranges.at(1) = std::pair<double,double>{0,max_bin_count*2};
 	// pedestal mean
 	fit_parameter_ranges.at(2) = std::pair<double,double>{0,spe_mean_guess};
 	// pedestal sigma
@@ -320,6 +320,9 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	std::cout<<"Setting parameter priors"<<std::endl;
 	RefreshParameters();
 	
+	// update internal TF1 limits
+	SetParameterLimits(fit_parameter_ranges);
+	
 	// print just to check and for info
 	std::cout<<"Piors and their limits are:"<<std::endl;
 	for(int pari=0; pari<full_fit_func->GetNpar(); ++pari){
@@ -330,9 +333,6 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		std::cout<<pari<<": ("<<parname<<") "<<lbound<<" < "<<value<<" < "<<ubound<<std::endl;
 	}
 	std::cout<<std::endl;
-	
-	// update internal TF1 limits
-	SetParameterLimits(fit_parameter_ranges);
 	
 	// update the user's vector
 	if(fit_pars!=nullptr) *fit_pars = GetParameters();
