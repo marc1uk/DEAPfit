@@ -155,6 +155,8 @@ int main(int argc, const char* argv[]){
     TFile* outfile=nullptr;
     TTree* outtree=nullptr;
     
+    std::string SourceFile;
+    std::string SourceFileHistName;
     int RunNum=0;
     int SubRun=0;
     int Voltage=0;
@@ -217,6 +219,8 @@ int main(int argc, const char* argv[]){
         outfile = new TFile(outputfilename.c_str(),"RECREATE");
         outfile->cd();
         outtree = new TTree("fit_parameters","fit_parameters");
+        TBranch* bSourceFile = outtree->Branch("SourceFile",&SourceFile);
+        TBranch* bSourceFileHistName = outtree->Branch("SourceFileHistName",&SourceFileHistName);
         TBranch* bDetKey = outtree->Branch("DetectorKey",&file_detectorkey);
         TBranch* bRunNum = outtree->Branch("Run",&RunNum);
         TBranch* bSubRun = outtree->Branch("SubRun",&SubRun);
@@ -308,6 +312,7 @@ int main(int argc, const char* argv[]){
     // scan over input files and pull the histograms we're going to analyse
     for(std::string& filename : inputfiles){
         
+        SourceFile = filename;
         histos_to_fit.clear();
         
         // ==================================
@@ -408,7 +413,7 @@ int main(int argc, const char* argv[]){
                 if(success){
                     std::cout<<"Found charge histogram "<<histname<<std::endl;
                     // read the histogram from the file into memory(?) and get a pointer
-                    thehist = (TH1*)key->ReadObj();
+                    thehist = (TH1*)key->ReadObj();  // should we call thehist->Delete() when we're done with it?
                     histos_to_fit.emplace(detectorkey,thehist);
                 }
             } // end loop over keys in file
@@ -436,7 +441,8 @@ int main(int argc, const char* argv[]){
             thehist = ahisto.second;
             if(thehist==nullptr){ std::cerr<<"No hist"<<std::endl; return 0; }
             std::string histname = thehist->GetName();
-            histname += std::to_string(Voltage);
+            SourceFileHistName = histname;
+            histname += "_"+std::to_string(Voltage)+"V";
             
             if(precut==0){ // offset & histos_to_analyse consider ALL histograms, not just those viable for fit
                 // in this case increment our current histo index and skip if less than our starting index
@@ -549,8 +555,9 @@ int main(int argc, const char* argv[]){
                 }
             }
             
-            // having updated our count of viable histograms, check if we've hit our start point yet
-            if(precut){
+            // if we DID find an peak, update our offset counter (which only counts those passing the cut)
+            // and now check if we've reached our starting point
+            if(precut && found_spe_peak){
                 // in this case offset & histos_to_analyse only count histograms after they've passed PeakScan
                 if(offsetcount<offset){
                     ++offsetcount;
@@ -560,7 +567,7 @@ int main(int argc, const char* argv[]){
             
             // if we *didn't* pass both our pre-flight checks, but we *are* supposed to analyse this histo,
             // write the histo and TTree entry to file before moving on
-            if(not found_spe_peak){
+            if((not found_spe_peak) && (not offsetcount<offset)){
                 // save histograms we skip, so we have a complete set and we can see what we missed
                 outfile->cd();
                 thehist->Write(histname.c_str());
@@ -594,6 +601,7 @@ int main(int argc, const char* argv[]){
                 
                 continue; // sorry, if we can't find a second bump, i can't generate suitable priors
             }
+            // Hopefully, finally, this should be a histogram we're meant to analyse, and can do so!
             
             //only scale the axes AFTER calling PeakScan (PeakScan should be count-independent: FIXME)
             double xscaling = 1;

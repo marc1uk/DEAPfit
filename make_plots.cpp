@@ -62,8 +62,9 @@ int main(int argc, const char* argv[]){
             // histogram names are "hist_charge_xxx" where xxx is the ToolAnalysis detectorkey for that PMT.
             std::string histname = key->GetName();
             int detectorkey;
+            int voltage;
             int n = 0;
-            int cnt = sscanf(histname.c_str(),"hist_charge_%d %n",&detectorkey, &n);
+            int cnt = sscanf(histname.c_str(),"hist_charge_%d_%dV %n",&detectorkey, &voltage, &n);
             int success = ((n >0) && ((histname.c_str())[n]=='\0'));
             if(success){
                 std::cout<<"Found charge histogram "<<histname<<std::endl;

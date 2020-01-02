@@ -32,7 +32,7 @@ OUTFILEBASE="R1214_to_R1231_PMTStability_mk2";
 #INPUTFILE="R1229S0_1250V_PMTStability_Run0.root"
 #INPUTFILE="R1230S0_1350V_PMTStability_Run32668.root"
 #INPUTFILE="R1231S0_1450V_PMTStability_Run0.root"
-INPUTFILES=("R1214S1_1100V_PMTStability_Run32676.root" "R1215S0_1200V_PMTStability_Run0.root" "R1216S0_1300V_PMTStability_Run0.root" "R1217S0_1400V_PMTStability_Run0.root" "R1218S0_1500V_PMTStability_Run0.root" "R1219S0_1600V_PMTStability_Run32664.root" "R1220S0_1700V_PMTStability_Run0.root" "R1227S0_1050V_PMTStability_Run0.root" "R1228S0_1150V_PMTStability_Run0.root" "R1229S0_1250V_PMTStability_Run0.root" "R1230S0_1350V_PMTStability_Run32668.root" "R1231S0_1450V_PMTStability_Run0.root")
+INPUTFILES=("R1227S0_1050V_PMTStability_Run0.root" "R1214S1_1100V_PMTStability_Run32676.root" "R1228S0_1150V_PMTStability_Run0.root" "R1215S0_1200V_PMTStability_Run0.root" "R1229S0_1250V_PMTStability_Run0.root" "R1216S0_1300V_PMTStability_Run0.root" "R1230S0_1350V_PMTStability_Run32668.root" "R1217S0_1400V_PMTStability_Run0.root" "R1231S0_1450V_PMTStability_Run0.root" "R1218S0_1500V_PMTStability_Run0.root" "R1219S0_1600V_PMTStability_Run32664.root" "R1220S0_1700V_PMTStability_Run0.root")
 echo "input file list is: ${INPUTFILES[@]}"
 
 # these are suitable with one input file, but not many
