@@ -9,10 +9,10 @@ let HISTOGRAMS_PER_JOB=10
 
 SOURCEFILEDIR="/pnfs/annie/persistent/users/moflaher/deapfit/DEAPfit"
 SOURCEFILE="DEAP_fitting.tar.gz"
-INPUTDIR="/pnfs/annie/persistent/users/moflaher/deapfit_inputs"
+INPUTDIR="/pnfs/annie/persistent/users/moflaher/deapfit_inputs/R1214_R1233"
 OUTPUTDIR="/pnfs/annie/persistent/users/moflaher/deapfit_results"
 OUTPUTDIRFALLBACK="/pnfs/annie/persistent/users/moflaher/deapfit_results" # fallback if ifdh mkdir fails to work*
-OUTFILEBASE="R1214_to_R1231_PMTStability_mk2";
+OUTFILEBASE="R1214_to_R1233_PMTStability";
 
 # NOTE: ifdh mkdir doesn't accept the -p argument. XXX actually it doesn't seem to work at all!!
 # ENSURE OUTPUT DIRECTORY EXISTS
@@ -20,19 +20,22 @@ OUTFILEBASE="R1214_to_R1231_PMTStability_mk2";
 
 #INPUTFILE="LEDRun1178S0LEDs5And6And10And28_PulseWindowOnly_PMTStability_Run0.root"
 #INPUTFILE="R1214S0_1000V_PMTStability_Run0.root"
-#INPUTFILE="R1214S1_1100V_PMTStability_Run32676.root"
-#INPUTFILE="R1215S0_1200V_PMTStability_Run0.root"
-#INPUTFILE="R1216S0_1300V_PMTStability_Run0.root"
-#INPUTFILE="R1217S0_1400V_PMTStability_Run0.root"
-#INPUTFILE="R1218S0_1500V_PMTStability_Run0.root"
-#INPUTFILE="R1219S0_1600V_PMTStability_Run32664.root"
-#INPUTFILE="R1220S0_1700V_PMTStability_Run0.root"
 #INPUTFILE="R1227S0_1050V_PMTStability_Run0.root"
+#INPUTFILE="R1214S1_1100V_PMTStability_Run0.root"
 #INPUTFILE="R1228S0_1150V_PMTStability_Run0.root"
+#INPUTFILE="R1215S0_1200V_PMTStability_Run0.root"
 #INPUTFILE="R1229S0_1250V_PMTStability_Run0.root"
-#INPUTFILE="R1230S0_1350V_PMTStability_Run32668.root"
+#INPUTFILE="R1216S0_1300V_PMTStability_Run0.root"
+#INPUTFILE="R1230S0_1350V_PMTStability_Run0.root"
+#INPUTFILE="R1217S0_1400V_PMTStability_Run0.root"
 #INPUTFILE="R1231S0_1450V_PMTStability_Run0.root"
-INPUTFILES=("R1227S0_1050V_PMTStability_Run0.root" "R1214S1_1100V_PMTStability_Run32676.root" "R1228S0_1150V_PMTStability_Run0.root" "R1215S0_1200V_PMTStability_Run0.root" "R1229S0_1250V_PMTStability_Run0.root" "R1216S0_1300V_PMTStability_Run0.root" "R1230S0_1350V_PMTStability_Run32668.root" "R1217S0_1400V_PMTStability_Run0.root" "R1231S0_1450V_PMTStability_Run0.root" "R1218S0_1500V_PMTStability_Run0.root" "R1219S0_1600V_PMTStability_Run32664.root" "R1220S0_1700V_PMTStability_Run0.root")
+#INPUTFILE="R1218S0_1500V_PMTStability_Run0.root"
+#INPUTFILE="R1219S0_1600V_PMTStability_Run0.root"
+#INPUTFILE="R1220S0_1700V_PMTStability_Run0.root"
+#INPUTFILE="R1232S0_1800V_02Range_PMTStability_Run0.root"
+#INPUTFILE="R1233S0_1900V_02Range_PMTStability_Run0.root"
+#INPUTFILES=("R1227S0_1050V_PMTStability_Run0.root" "R1214S1_1100V_PMTStability_Run0.root" "R1228S0_1150V_PMTStability_Run0.root" "R1215S0_1200V_PMTStability_Run0.root" "R1229S0_1250V_PMTStability_Run0.root" "R1216S0_1300V_PMTStability_Run0.root" "R1230S0_1350V_PMTStability_Run0.root" "R1217S0_1400V_PMTStability_Run0.root" "R1231S0_1450V_PMTStability_Run0.root" "R1218S0_1500V_PMTStability_Run0.root" "R1219S0_1600V_PMTStability_Run0.root" "R1220S0_1700V_PMTStability_Run0.root")
+INPUTFILES=("deap_files_list.txt")
 echo "input file list is: ${INPUTFILES[@]}"
 
 # these are suitable with one input file, but not many

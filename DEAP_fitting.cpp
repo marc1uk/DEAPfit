@@ -64,7 +64,8 @@ int main(int argc, const char* argv[]){
     sarge.setArgument("n", "numhistos", "Process this many histograms before exiting (0, default=all from start)", true);
     sarge.setArgument("p", "precut", "Should offset and numhistos consider all histograms (0) or only those passing the PeakScan pre-cut (1, default)", true);
     sarge.setArgument("o", "output", "Name of output file (default 'DEAPfitter_outfile.root')", true);
-    sarge.setArgument("j", "justscan", "Just do PeakScan and print histograms viable for fitting", false);
+    sarge.setArgument("j", "viabilityscan", "Just record histograms viable for fitting", false);
+    sarge.setArgument("l", "histogramscan", "Just find histograms for fitting in input files",false);
     sarge.setArgument("b", "background_file", "File of background-only histograms for pedestal estimation",true);
     sarge.setDescription("Program to try to fit PMT pulse charge distributions in order to extract gain");
     sarge.setUsage("deapfit <options> <inputfiles>");
@@ -74,7 +75,7 @@ int main(int argc, const char* argv[]){
         return 1;
     }
     
-    if(sarge.exists("help")){ sarge.printHelp(); return 0; }
+    if(sarge.exists("help") || argc<2){ sarge.printHelp(); return 0; }
     
     // get the type of input file
     // this is used to determine the x-axis units, and scaling required to put in pC
@@ -124,8 +125,9 @@ int main(int argc, const char* argv[]){
     sarge.getFlag("output", outputfilename);
     
     // check if we're just doing a pre-scan
-    int prescan_only = sarge.exists("justscan");
-    if(prescan_only){
+    int viability_checks_only = sarge.exists("viabilityscan");
+    int histogram_scan_only = sarge.exists("histogramscan");
+    if(viability_checks_only||histogram_scan_only){
         // strip off extention
         std::string filenamewithoutextention = outputfilename;
         if(outputfilename.find(".") != std::string::npos){
@@ -133,7 +135,7 @@ int main(int argc, const char* argv[]){
         }
         // replace with .txt
         outputfilename = filenamewithoutextention+".txt";
-        std::cout<<"Will output a list of histograms passing PeakScan to "<<outputfilename<<std::endl;
+        std::cout<<"Will output a list of histograms to "<<outputfilename<<std::endl;
     } else {
         std::cout<<"Results will be written to "<<outputfilename<<std::endl;
     }
@@ -219,7 +221,7 @@ int main(int argc, const char* argv[]){
     // or in the case of just prescan
     std::ofstream passingHistos;
     
-    if(not prescan_only){
+    if(not (viability_checks_only||histogram_scan_only)){
         // make an output file in which to save results
         outfile = new TFile(outputfilename.c_str(),"RECREATE");
         outfile->cd();
@@ -355,6 +357,77 @@ int main(int argc, const char* argv[]){
         } // end loop over keys in file
     } // end if we have a background file
     
+    // ==========================
+    // PARSE INPUT HISTOGRAM LIST
+    // ==========================
+    // our input files may be a set of macros, a set of root files, or it may be a single text file
+    // containing a list of root files and keys. This is useful for ragged datasets where we only want
+    // to analyse some histograms in a file, or where the voltage setpoints of each PMT are not all the same
+    // (since normally voltages are extracted from the filename)
+    // if we're given such text file, parse it now
+    bool input_file_list=false; // note that we're doing this, as later looping will be different
+    
+    // map of keys in each file
+    std::map<std::string,std::vector<std::string>> histogram_selection;
+    // map of runs and subrun numbers for each file
+    std::map<std::string,int> run_list, subrun_list;
+    // map of voltages for each PMT in each file. Keys are filename_histogramname
+    std::map<std::string,double> voltage_list;
+    if(inputfiles.size()==1){
+        std::string file_list=inputfiles.front();
+        if(file_list.substr(0,file_list.length()-4)==".txt"){
+            std::ifstream fin (file_list.c_str());
+            if(not fin.is_open()){
+                std::cerr<<"Error reading file list "<<inputfiles.front()<<"!"<<std::endl;
+                return 1;
+            }
+            // temporary variables for parsing
+            std::string Line;
+            std::stringstream ssL;
+            std::string rootfile, histname;
+            int rrun, ssubrun;
+            double vvoltage;
+            std::string lastrootfile="";
+            
+            inputfiles.clear(); // we'll rebuild this from the contents of the file list
+            // loop over lines in file
+            while (getline(fin, Line)){
+                if (Line.empty()) continue;
+                if (Line[0] == '#') continue;
+                ssL.str("");
+                ssL.clear();
+                ssL << Line;
+                // extract the histogram variables
+                if (ssL.str() != ""){
+                    ssL >> rootfile >> rrun >> ssubrun >> histname >> vvoltage;
+                }
+                
+                // if this line is a new file
+                if(rootfile!=lastrootfile){
+                    // note our transition to a new file
+                    lastrootfile=rootfile;
+                    // add it to the list of input files to process
+                    inputfiles.push_back(rootfile);
+                    // create a vector of keys to associate with this file
+                    histogram_selection.emplace(rootfile,std::vector<std::string>{});
+                    // note it's run and subrun
+                    run_list.emplace(rootfile,rrun);
+                    subrun_list.emplace(rootfile,ssubrun);
+                }
+                
+                // add this key to the list of histograms to fit for this file
+                histogram_selection.at(rootfile).push_back(histname);
+                // record the test voltage with a unique key for this file and PMT
+                std::string uniquekey = rootfile+"_"+histname;
+                voltage_list.emplace(uniquekey,vvoltage);
+            } // end loop over file lines
+            fin.close();
+        } // end if extension is txt
+    } // end if we were only passed 1 input file
+    
+    // =====================
+    // LOOP OVER INPUT FILES
+    // =====================
     // scan over input files and pull the histograms we're going to analyse
     for(std::string& filename : inputfiles){
         
@@ -377,8 +450,8 @@ int main(int argc, const char* argv[]){
         std::cout<<"extension is: "<<extension<<std::endl;
         // handle standalone histogram files
         if(extension==".C"||extension==".c"){
-            if(types.count(1)){
-                std::cerr<<"Please don't mix input files of type .C and .root, detector keys will be meaningless."
+            if(types.count(1)+types.count(2)){
+                std::cerr<<"Please don't mix input file types, detector keys will be meaningless."
                          <<std::endl;
                 return 1;
             }
@@ -425,9 +498,9 @@ int main(int argc, const char* argv[]){
                 }
             }
         // handle root files
-        } else if(extension==".root"){
-            if(types.count(0)){
-                std::cerr<<"Please don't mix input files of type .C and .root, detector keys will be meaningless."
+        } else if((extension==".root") && (input_file_list==false)){
+            if(types.count(0)+types.count(2)){
+                std::cerr<<"Please don't mix input file types, detector keys will be meaningless."
                          <<std::endl;
                 return 1;
             }
@@ -464,22 +537,57 @@ int main(int argc, const char* argv[]){
                 }
             } // end loop over keys in file
             
+            // try to pull the voltage and run number from the ToolAnalysis filename
+            // expect something like: R1214S0_1000V_PMTStability_Run0.root
+            int cnt = sscanf(filename.c_str(),"R%dS%d_%dV",&RunNum,&SubRun,&Voltage);
+            
             // also make a canvas if we don't have one
             if(c1==nullptr) c1 = new TCanvas("c1");
-        } // end rootfile case
+            
+        // handle a list of files and keys
+        } else if((extension==".root") && (input_file_list==true)){
+            if(types.count(0)+types.count(1)){
+                std::cerr<<"Please don't mix input file types, detector keys will be meaningless."
+                         <<std::endl;
+                return 1;
+            }
+            if(types.size()==0) types.emplace(2,2);
+            // open the input file, but retrieve the list of keys and voltages from previous parsing
+            std::vector<std::string> histograms_in_this_file = histogram_selection.at(filename);
+            
+            
+            // Open root file
+            infile = TFile::Open(filename.c_str(),"READ");
+            // pull out the pulse charge distribution histograms we've been told to
+            std::cout<<"looping over keys"<<std::endl;
+            for(std::string& histname : histograms_in_this_file){
+                int detectorkey;
+                int n = 0;
+                int cnt = sscanf(histname.c_str(),"hist_charge_%d %n",&detectorkey, &n);
+                int success = ((n >0) && ((histname.c_str())[n]=='\0'));
+                if(success){
+                    std::cout<<"Found charge histogram "<<histname<<std::endl;
+                    // read the histogram from the file into memory(?) and get a pointer
+                    thehist = (TH1*)infile->Get(histname.c_str());  // should we call thehist->Delete()
+                    histos_to_fit.emplace(detectorkey,thehist);     // when we're done with it?
+                }
+                
+                // get the run and subrun settings noted earlier during file list parsing
+                RunNum = run_list.at(filename);
+                SubRun = subrun_list.at(filename);
+            } // end loop over keys in file
+            
+            // also make a canvas if we don't have one
+            if(c1==nullptr) c1 = new TCanvas("c1");
+        } // end .txt file type case
+        
         std::cout<<"Found "<<histos_to_fit.size()<<" histograms to fit"<<std::endl;
         
         if(c1==nullptr){ c1 = new TCanvas("c1"); }
         
-        // try to pull the voltage and run number from the ToolAnalysis filename
-        // expect something like: R1214S0_1000V_PMTStability_Run0.root
-        int cnt = sscanf(filename.c_str(),"R%dS%d_%dV",&RunNum,&SubRun,&Voltage);
-        
-        // =========================================
-        // END OF HISTOGRAM SCAN
-        // MOVE TO FITTING HISTOGRAMS
-        // =========================================
-        
+        // =================================
+        // LOOP OVER HISTOGRAMS IN THIS FILE
+        // =================================
         // Loop over histos to fit
         for(auto&& ahisto : histos_to_fit){
             // get next histogram
@@ -492,11 +600,39 @@ int main(int argc, const char* argv[]){
                 bghist = nullptr;
             }
             std::string histname = thehist->GetName();
+            if(input_file_list){
+                // voltage setpoints may vary between PMTs in this file
+                // the voltage will have been stored earlier; build the key and retrieve it
+                std::string uniquekey = filename+"_"+histname;
+                if(voltage_list.count(uniquekey)){
+                    Voltage = voltage_list.at(uniquekey);
+                } else {
+                    std::cerr<<"ERROR: no stored voltage for file "<<filename
+                             <<", histogram "<<histname<<std::endl;
+                    Voltage = 0;
+                }
+            }
+            
             SourceFileHistName = histname;
             histname += "_"+std::to_string(Voltage)+"V";
             
-            if(precut==0){ // offset & histos_to_analyse consider ALL histograms, not just those viable for fit
-                // in this case increment our current histo index and skip if less than our starting index
+            // Continue if Histogram Scan Only
+            // ===============================
+            if(histogram_scan_only){
+                // if just finding histograms, record to file and continue
+                std::cout<<"Found histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+                // format should match format accepted by file_list, so we can make such files easily
+                passingHistos<<filename<<" "<<RunNum<<" "<<SubRun
+                             <<" "<<SourceFileHistName<<" "<<Voltage<<std::endl;
+                continue;
+            }
+            
+            // Skip until our start
+            // ====================
+            // if precut == 0, offset & histos_to_analyse consider ALL histograms,
+            // not just those viable for fit. increment our histo counter
+            // and skip if less than our starting index
+            if(precut==0){
                 if(offsetcount<offset){
                     ++offsetcount;
                     continue;
@@ -600,8 +736,6 @@ int main(int argc, const char* argv[]){
                 // pass to the fitter
                 deapfitter.SetHisto(thehist, bghist);
                 deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
-                // ↑ FIXME for histos with a small number of bins TH1::Smooth ADDS valleys!
-                // hopefully these are filtered out by the previous scan....
                 
                 // Scan for a second peak after pedestal
                 found_spe_peak = deapfitter.PeakScan(&precheck_pars);
@@ -635,27 +769,37 @@ int main(int argc, const char* argv[]){
             // update our counter of viable histograms if it passes both pre-test checks
             if(found_spe_peak||force_fit){
                 histos_with_a_peak++;
-                // if all we're doing is counting viable histograms, we can move on
-                if(prescan_only){
-                    // if just counting viable histograms, print details, increase count in this file and continue
-                    std::cout<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
-                    passingHistos<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
-                    continue;
-                }
             }
             
-            // if we DID find an peak, update our offset counter (which only counts those passing the cut)
-            // and now check if we've reached our starting point
+            // Continue if Viability Scan Only
+            // ===============================
+            if(viability_checks_only){
+                if(found_spe_peak||force_fit){
+                    // if just counting viable histograms, record to file and continue
+                    std::cout<<"Try to fit histo "<<thehist->GetName()<<" in file "<<filename<<std::endl;
+                    // format should match format accepted by file_list, so we can make such files easily
+                    passingHistos<<filename<<" "<<RunNum<<" "<<SubRun
+                                 <<" "<<SourceFileHistName<<" "<<Voltage<<std::endl;
+                }
+                continue;
+            }
+            
+            // Skip Until Start
+            // ================
+            // if precut == 1, offset & histos_to_analyse only consider histograms passing
+            // viability checks. So if precut ==1, check if this histogram passes viability checks,
+            // and if so increment our histo counter and skip if less than our starting index
             if(precut && (found_spe_peak||force_fit)){
-                // in this case offset & histos_to_analyse only count histograms after they've passed PeakScan
                 if(offsetcount<offset){
                     ++offsetcount;
                     continue;
                 }
             }
             
+            // Record Failing Histograms
+            // =========================
             // if we *didn't* pass both our pre-flight checks, but we *are* supposed to analyse this histo,
-            // write the histo and TTree entry to file before moving on
+            // write the histo and TTree entry to file and move on to the next histo
             if((not (found_spe_peak||force_fit)) && (not offsetcount<offset)){
                 // save histograms we skip, so we have a complete set and we can see what we missed
                 outfile->cd();
@@ -692,6 +836,11 @@ int main(int argc, const char* argv[]){
             }
             // Hopefully, finally, this should be a histogram we're meant to analyse, and can do so!
             
+            // ================================================================
+            // ===========================
+            // Start of the Fit Procedure!
+            // ===========================
+            // ================================================================
             //only scale the axes AFTER calling PeakScan (PeakScan should be count-independent: FIXME)
             double xscaling = 1;
             if(filesourcestring=="ToolAnalysis"){
