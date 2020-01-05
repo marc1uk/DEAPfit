@@ -14,6 +14,9 @@ makeplots: ./make_plots.cpp
 makegains: ./make_hv_vs_gains.cpp
 	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./make_hv_vs_gains.cpp -o makegains
 
+plotgains: ./plot_gains_vs_hv.cpp
+	g++ $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) ./plot_gains_vs_hv.cpp -o plotgains
+
 deaplib: ./DEAP_fitting.cpp DEAPFitFunction.cpp DEAPFitFunction.h DEAPFitFunction_RootDict.cpp
 	g++ $(CXXFLAGS) $(CPPFLAGS) -shared -fPIC $(LDFLAGS) $^ -o libdeapfit.so
 
