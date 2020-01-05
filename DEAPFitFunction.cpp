@@ -8,7 +8,9 @@ DEAPFitFunction::DEAPFitFunction(int max_pes_in){
 
 DEAPFitFunction::~DEAPFitFunction(){
 	//std::cout<<"DEAPFitFunction destructor"<<std::endl;
-	///std::cout<<"Deleting pedestal function"<<std::endl;
+	//std::cout<<"Deleting standalone pedestal function"<<std::endl;
+	if(pedestal_standalone) delete pedestal_standalone; pedestal_standalone=nullptr;
+	//std::cout<<"Deleting pedestal function"<<std::endl;
 	if(pedestal_func) delete pedestal_func; pedestal_func=nullptr;
 	//std::cout<<"Deleting spe function"<<std::endl;
 	if(spe_func) delete spe_func; spe_func=nullptr;
@@ -94,7 +96,7 @@ int DEAPFitFunction::LoadRanges(){
 	}
 }
 
-void DEAPFitFunction::SetHisto(TH1* histo){
+void DEAPFitFunction::SetHisto(TH1* histo, TH1* bg_histo){
 	if(histo==nullptr){
 		std::cerr<<"DEAPFitFunction::SetHisto called with nullptr!"<<std::endl;
 		return;
@@ -106,6 +108,26 @@ void DEAPFitFunction::SetHisto(TH1* histo){
 		thehist->GetListOfFunctions()->Clear();
 	}
 	SetRanges();
+	
+	if(bg_histo) SetBackgroundHisto(bg_histo);
+	else bghist = nullptr; // clear it so that we don't accidentally use it on the wrong histo
+	
+	// clear internal flags that record whether we've fit a background histogram
+	// and whether we've used EstimateSPE. These are used in GeneratePriors.
+	ran_fit_pedestal=false; ran_estimate_spe=false; ran_estimate_mean_npe=false;
+}
+
+void DEAPFitFunction::SetBackgroundHisto(TH1* histo){
+	if(histo==nullptr){
+		std::cerr<<"DEAPFitFunction::SetBackgroundHisto called with nullptr!"<<std::endl;
+		return;
+	}
+	bghist = histo;
+	if(bghist->GetListOfFunctions()->GetSize()>0){
+		//std::cerr<<"WARNING: DEAPFitFunction::SetBackgroundHisto clears any functions "
+		//	 <<"owned by input histogram!"<<std::endl;
+		bghist->GetListOfFunctions()->Clear();
+	}
 }
 
 TH1* DEAPFitFunction::ScaleHistoXrange(double inscaling){
@@ -129,7 +151,33 @@ TH1* DEAPFitFunction::ScaleHistoYrange(double inscaling){
 }
 
 TH1* DEAPFitFunction::SmoothHisto(int smoothing){
-	thehist->Smooth(smoothing);
+	//thehist->Smooth(smoothing);
+	
+	// ROOT's TH1::Smooth is fine when the histogram spans enough bins,
+	// but for histograms with only a few populated bins it can add large peaks and valleys
+	// to a previously smooth part of the histogram!
+	// In extreme cases it even creates valleys that split the histogram such that
+	// bins in a previously highly populated region are empty!!!
+	// The problem may be related to poor handling of sharp gradients in histograms
+	// dominated by a narrow gaussian
+	// (this epiphany came from attempts to convert to a TGraph and use TGraphSmooth,
+	//  which fit the tail well but then the errors would explode at the sharp pedestal rise)
+	// 
+	// SO: since we're fitting it in log form anyway, convert it to log, smooth it, then convert it back!
+	TH1D smoothhist("smoothhist","smoothhist",
+		thehist->GetNbinsX(),thehist->GetXaxis()->GetXmin(),thehist->GetXaxis()->GetXmax());
+	for(int bini=0; bini<thehist->GetNbinsX(); bini++){
+		double bincont = (thehist->GetBinContent(bini)==0) ? 0 : log(thehist->GetBinContent(bini));
+		smoothhist.SetBinContent(bini,bincont);
+	}
+	smoothhist.Smooth(smoothing);
+	
+	// transfer smoothed bin contents back, accounting for our temporary log
+	for(int bini=0; bini<thehist->GetNbinsX(); bini++){
+		double bincont = (smoothhist.GetBinContent(bini)==0) ? 0 : exp(smoothhist.GetBinContent(bini));
+		thehist->SetBinContent(bini,bincont);
+	}
+	
 	return thehist;
 }
 
@@ -193,24 +241,190 @@ bool DEAPFitFunction::PeakScan(std::vector<double>* precheck_pars){
 	return spe_peak_found;
 }
 
-bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<std::pair<double,double>>* par_limits){
+int DEAPFitFunction::FitPedestal(std::vector<double>* ped_pars){
+	if(bghist==nullptr){
+		std::cerr<<"DEAPFitFunction::FidPedestal called with no background histogram set!"<<std::endl
+			 <<"Call DEAPFitFunction::SetBackgroundHisto before this, or pass it "
+			 <<"with DEAPFitFunction::SetHisto(TH1* signal_histo, TH1* bg_histo)"<<std::endl;
+		return 0;
+	}
 	
-	if(not spe_peak_found){
+	// fit a gaussian to the provided background-only histogram
+	// pedestal_standalone is "gaus" == [0]*exp(-0.5*((x-[1])/[2])**2)
+	int fit_success = bghist->Fit(pedestal_standalone,"QN"); // quiet, do not store
+	
+	if(fit_success){
+		std::cerr<<"DEAPFitFunction::FidPedestal fit failed!"<<std::endl
+			 <<"Pedestal parameters will not be set!"<<std::endl;
+		return fit_success;
+	}
+	
+	// retrieve the fit parameters
+	// we don't take the amplitude because the counts in background and signal histos may be different
+	ped_mean = pedestal_standalone->GetParameter(1);
+	ped_sigma = pedestal_standalone->GetParameter(2);
+	
+	// pass to the internal pedestal function to keep in sync
+	if(pedestal_func){
+		pedestal_func->SetParameter("ped_mean",ped_mean);
+		pedestal_func->SetParameter("ped_sigma",ped_sigma);
+	}
+	
+	// if we were given a vector, fill the components with the fit parameters
+	*ped_pars = std::vector<double>{pedestal_standalone->GetParameter(0),ped_mean,ped_sigma};
+	
+	ran_fit_pedestal = true; // note that we ran this, for use in GeneratePriors
+	return fit_success;
+}
+
+double DEAPFitFunction::EstimateMeanNPE(){
+	// We can use a histogram of background-only events to estimate the mean_npe (aka occupancy)
+	// We do this by placing a low-charge cut on the background-only distribution,
+	// such that in our total distribution it would only capture background events.
+	// We apply this cut to the blank distribution and calculate what fraction of background it contains,
+	// in order to determine the efficiency of the cut.
+	// We then apply the cut to the total distribution, and correct for the efficiency to estimate
+	// the number of 0-pe events it contains.
+	// Assuming a poisson distribution for the number of pe's in an event, the number of 0-pe events
+	// can be used to determine the mean number of pes via:
+	// mean_npe = -ln(n_0pe_triggers/n_total_triggers)
+	
+	if(thehist==nullptr){
+		std::cerr<<"DEAPFitFunction::EstimateMeanNPE called but we have no histogram!"
+			 <<" Call SetHisto first"<<std::endl;
+		return -1;
+	}
+	
+	if(bghist==nullptr){
+		std::cerr<<"DEAPFitFunction::EstimateMeanNPE requires a charge distribution"
+			 <<"  of background-only events! Call SetBackgroundHisto first"<<std::endl;
+		return -1;
+	}
+	
+	// fit the pedestal if we haven't, and then use the fit to derive a cut-off charge
+	if(not ran_fit_pedestal){
+		int fpsucess = FitPedestal();
+		if(fpsucess!=0) return -1;
+	}
+	double ped_cutoff = ped_mean + ped_sigma*5.; // teal uses 5, which seems like a lot...
+	
+	// first determine the cut efficiency with the background histogram
+	// count num events below the cutoff
+	double low_q_background_events=0;
+	for(int bini=1; bini<bghist->GetNbinsX(); bini++){ // bin 0 is the underflow bin
+		double bincenter = bghist->GetBinCenter(bini);
+		if(bincenter>ped_cutoff) break;
+		low_q_background_events += bghist->GetBinContent(bini);
+	}
+	// determine the cut efficiency
+	double cut_efficiency = low_q_background_events/bghist->GetEntries();
+	
+	// count the number of events with charge below the cut threshold
+	double n_0pe_triggers=0;
+	for(int bini=1; bini<thehist->GetNbinsX(); bini++){ // bin 0 is the underflow bin
+		double bincenter = thehist->GetBinCenter(bini);
+		if(bincenter>ped_cutoff) break;
+		n_0pe_triggers += thehist->GetBinContent(bini);
+	}
+	// scale it up by the efficiency
+	n_0pe_triggers /= cut_efficiency;
+	
+	// get the occupancy
+	mean_npe = -log(n_0pe_triggers/thehist->GetEntries());
+	
+	ran_estimate_mean_npe = true;
+	return mean_npe;
+}
+
+bool DEAPFitFunction::EstimateSPE(std::vector<double>* specheck_pars){
+	// ========================================================================
+	// STEP 1b: USE FERMI METHOD TO ESTIMATE SPE PEAK POSITION
+	// ========================================================================
+	// mean_spe_charge = (mean_total_dist - mean_bg_dist) / mean_npe
+	// where
+	// * mean_total_dist is the mean of the charge distribution for signal+background
+	// * mean_bg_dist is the mean of the charge distribution for background only
+	// * mean_npe is the mean of the discrete probability distribution of the number of pe's in a flash
+	
+	if(not ran_estimate_mean_npe){
+		double mnpeok = EstimateMeanNPE();
+		if(mnpeok<0) return false;
+	}
+	
+	// finally determine the mean spe charge
+	double mean_total_dist = thehist->GetMean();
+	double mean_bg_dist = bghist->GetMean();
+	mean_spe_charge = (mean_total_dist - mean_bg_dist) / mean_npe;
+	
+	// to derive some estimate of the width of the SPE peak, we can calculate the spe variance
+	// spe_charge_variance = (tot_dist_variance - bg_dist_variance)/mean_npe - mean_spe_charge^2
+	double bg_dist_variance = pow(bghist->GetStdDev(),2.);
+	double tot_dist_variance = pow(thehist->GetStdDev(),2.);
+	spe_charge_variance = (tot_dist_variance - bg_dist_variance)/mean_npe - pow(mean_spe_charge,2.);
+	
+	// pass back to the user
+	if(specheck_pars){
+		// TODO it would make sense to pass these back as a map<name,value> so they have meaning
+		*specheck_pars = std::vector<double>{mean_total_dist,
+						     mean_bg_dist,
+						     mean_npe,
+						     mean_spe_charge,
+						     bg_dist_variance,
+						     tot_dist_variance,
+						     spe_charge_variance};
+	}
+	
+	ran_estimate_spe = true;  // note that we ran this, for use in GeneratePriors
+	return true; // TODO error checking?
+}
+
+bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<std::pair<double,double>>* par_limits, bool force_fit){
+	
+	if(not spe_peak_found || force_fit){
 		std::cerr<<"ERROR: Sorry, current generation of suitable priors relies on successful finding of "
 			 <<" a second bump in the charge distribution. Please run PeakScan first, if you haven't."
 			 <<"If you have, no suitable bump was found."<<std::endl
 			 <<"To proceed, you'll need to generate your own priors "
 			 <<"and pass them via DEAPFitFunction::SetParameters."
 			 <<std::endl;
+		return false;
 	}
 	
+	// there are a few potential sources that may have already set prior values
+	// that we may not wish to override:
+	// * if we called FitPedestal, we have ped_mean and ped_sigma
+	// * if we called EstimateMeanNPE, we have mean_npe
+	// * if we called EstimateSPE, we have mean_spe_charge and spe_charge_variance,
+	//   which can be used to determine spe_firstgamma_mean and spe_firstgamma_shape
+	// 
+	// we track calls to these functions with booleans that get reset on SetHisto:
+	// ran_estimate_mean_npe: determines if we should leave mean_npe as is
+	// ran_estimate_spe:      determines if we should use mean_spe_charge and spe_charge_variance
+	//                           for calculating spe_firstgamma parameters (shape: TODO),
+	// ran_fit_pedestal:      determines if we should leave ped_mean and ped_sigma as is
+	
 	// ========================================================================
-	// STEP 2: HEURISTICS (guessing)
+	// STEP 2: ESTIMATE STARTING PARAMETER VALUES
 	// ========================================================================
+	// general parameters
+	// ------------------
+	prescaling = 0.1;           // overall scaling of the entire function TODO tune from histogram?
+	// TODO this seems redundant given that we also have scaling for the individual components;
+	// try removing/fixing this parameter to speed up fitting?
+	
+	// if we didn't use EstimateSPE, guess some generic low-value mean_npe...
+	if(not ran_estimate_mean_npe){
+		mean_npe = 0.1;
+	}
+	
+	// highest bin should be pedestal; use it to estimate pedestal gaussian amplitude
 	double max_bin_count = thehist->GetBinContent(thehist->GetMaximumBin());
 	double pedestal_amp_guess = max_bin_count;
-	// if we found an SPE peak use its location, otherwise take for prior just a bit above mean
-	// also use its location to estimate pedestal width and SPE amplitude
+	
+	// if PeakScan found an SPE peak use its location as the SPE peak position prior,
+	// and to derive estimates of pedestal width and SPE amplitude
+	// otherwise take for prior just a bit above mean, and guesses for the others.
+	// n.b. we'll choose whether to use these values or others a little later
 	double spe_mean_guess;
 	double spe_amp_guess;
 	double pedestal_sigma_guess;
@@ -219,39 +433,44 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		spe_mean_guess = thehist->GetBinCenter(maxpos2)*1.1;
 		pedestal_sigma_guess = thehist->GetBinCenter(interpos)/10.;  // overwrite
 	} else {
+		// really crude fallback options
 		spe_amp_guess = pedestal_amp_guess;
 		spe_mean_guess = thehist->GetMean()*1.5;
 		pedestal_sigma_guess = 0.1; // based on being in pC ... TODO find a better way
 	}
 	
-	// ========================================================================
-	// STEP 2: BUILD A VECTOR OF THE PRIORS
-	// ========================================================================
-	
-	// general parameters
-	// ------------------
-	prescaling = 0.1;           // overall scaling of the entire function TODO tune from histogram?
-	// TODO this seems redundant given that we also have scaling for the individual components;
-	// try removing/fixing this parameter to speed up fitting
-	mean_npe = 0.1;            // TODO use occupancy: # of flashes with a hit over total # flashes
-	
 	// pedestal parameters
 	// -------------------
 	ped_scaling = pedestal_amp_guess;                            // pedestal amplitude (gaussian scaling)
-	ped_mean = thehist->GetBinCenter(thehist->GetMaximumBin());  // 0 only if baseline-subtracted (not perfect)
-	ped_sigma = pedestal_sigma_guess;                            // pedestal width
+	// if we fit a background-only histogram, we already have priors for the mean and sigma,
+	// otherwise estimate them now
+	if(not ran_fit_pedestal){
+		ped_mean = thehist->GetBinCenter(thehist->GetMaximumBin());  // often >0 even after baseline sub
+		ped_sigma = pedestal_sigma_guess;                            // pedestal width
+	}
 	
 	// spe parameters
 	// --------------
 	// the SPE consists of two 'Gaus' functions and an exponential
 	
 	// first gamma parameters
-	spe_firstgamma_scaling = spe_amp_guess;       // controls amplitude of main SPE function bump,
-	// although indirectly since we have two contributing gauss functions whose amplitudes are linked to this
-	spe_firstgamma_mean = spe_mean_guess;         // controls posn of peak via a stretching from the LH edge
-	spe_firstgamma_shape = 10;                    // an arbitrary shape factor. (1/b in the paper)
-	// controls how skewed to the left (low values) or symmetric (higher values) the peak is.
-	// more symmetric (higher) values also narrow the distribution.
+	if(ran_estimate_spe){
+		// if we ran EstimateSPE we have a measurement of the mean spe charge,
+		// which we can use to calculate the prior of spe_firstgamma_mean.
+		// We need to scale it up a bit as the mean SPE charge isn't the same as the SPE peak charge,
+		// but the translation between the two isn't that simple, sooo... fudge it up by 10%?
+		spe_firstgamma_scaling = thehist->GetBinContent(thehist->FindBin(mean_spe_charge));
+		spe_firstgamma_mean = mean_spe_charge*1.1;
+		spe_firstgamma_shape = 10; // TODO derive it from spe_charge_variance
+	} else {
+		// use our estimate from PeakScan results
+		spe_firstgamma_scaling = spe_amp_guess; // controls amplitude of main SPE function bump - but
+		// indirectly since we have two contributing gauss functions whose amplitudes are linked to this
+		spe_firstgamma_mean = spe_mean_guess;   // controls posn of peak by stretching from the LH edge
+		spe_firstgamma_shape = 10;              // an arbitrary shape factor. (1/b in the paper)
+	}
+	// the shape parameter controls how skewed left (low values) or symmetric (higher values) the peak is.
+	// more symmetric (higher) values also narrows the distribution.
 	// minimum of 1, almost a triangle vertical at the left edge, max >100, for nearly gaussian
 	
 	// secondary gamma parameters
@@ -284,6 +503,10 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// BUT actually, if this contributes too much, then its cutoff at the primary Gamma mean gives rise to a
 	// noticable discontinuity, so back it off a lot to 10 or even 5
 	// (the rest can be filled in by the secondary Gamma)
+	
+	// ========================================================================
+	// STEP 3: ESTIMATE PARAMETER FITTING RANGES
+	// ========================================================================
 	
 	// build the vector of fit parameter ranges
 	// prescaling
@@ -339,7 +562,7 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 	// update the user's limits
 	if(par_limits!=nullptr) *par_limits = fit_parameter_ranges;
 	
-	return spe_peak_found;
+	return true;
 }
 
 TF1* DEAPFitFunction::MakeFullFitFunction(){
@@ -637,6 +860,8 @@ double DEAPFitFunction::GetParameter(std::string parname){
 	if(parname=="spe_expl_charge_scaling") return spe_expl_charge_scaling;
 	if(parname=="mean_npe") return mean_npe;
 	if(parname=="max_pes") return max_pes;
+	if(parname=="mean_spe_charge") return mean_spe_charge;
+	if(parname=="spe_charge_variance") return spe_charge_variance;
 	else return std::numeric_limits<double>::max();
 }
 
@@ -727,6 +952,10 @@ std::vector<double> DEAPFitFunction::GetNPEPars(){
 	return NPE_pars;
 }
 
+TF1* DEAPFitFunction::GetBackgroundFunc(){
+	return pedestal_standalone;
+}
+
 double DEAPFitFunction::GetXscaling(){
 	return xscaling;
 }
@@ -749,7 +978,8 @@ double DEAPFitFunction::GetMeanSPECharge(){
 	// first make sure our SPE TF1 is up-to-date with the latest parameters
 	RefreshParameters();
 	// Now measure it's mean
-	return spe_func->Mean(histogram_minimum,histogram_maximum);
+	mean_spe_charge = spe_func->Mean(histogram_minimum,histogram_maximum);
+	return mean_spe_charge;
 }
 
 // ========================================================================
@@ -821,6 +1051,19 @@ double DEAPFitFunction::SPE_Func(double* x, double* SPE_pars){
 
 void DEAPFitFunction::ConstructFunctions(){
 	gROOT->cd();
+	
+	// firstly a standalone gaussian for fitting background-only histograms
+	// the reason we don't use ped_func is that ped_func doesn't include an amplitude parameter,
+	// and since we convolute with it a bunch, it's better not to add unnecessary parameters
+	if(not pedestal_standalone){
+		pedestal_standalone = new TF1("pedestal_standalone", "gaus");
+		// "gaus" is [0]*exp(-0.5*((x-[1])/[2])**2)
+		pedestal_standalone->SetParName(0,"ped_amp");
+		pedestal_standalone->SetParName(1,"ped_mean");
+		pedestal_standalone->SetParName(2,"ped_sigma");
+		pedestal_standalone->SetNpx(1000);
+	}
+	
 	// build the TF1 representing the pedestal component, if we have not yet done so
 	if(not pedestal_func){
 		std::cout<<"Creating Pedestal TF1"<<std::endl;

@@ -65,6 +65,7 @@ int main(int argc, const char* argv[]){
     sarge.setArgument("p", "precut", "Should offset and numhistos consider all histograms (0) or only those passing the PeakScan pre-cut (1, default)", true);
     sarge.setArgument("o", "output", "Name of output file (default 'DEAPfitter_outfile.root')", true);
     sarge.setArgument("j", "justscan", "Just do PeakScan and print histograms viable for fitting", false);
+    sarge.setArgument("b", "background_file", "File of background-only histograms for pedestal estimation",true);
     sarge.setDescription("Program to try to fit PMT pulse charge distributions in order to extract gain");
     sarge.setUsage("deapfit <options> <inputfiles>");
     
@@ -136,6 +137,10 @@ int main(int argc, const char* argv[]){
     } else {
         std::cout<<"Results will be written to "<<outputfilename<<std::endl;
     }
+    
+    // get background file if we were passed one
+    std::string bgfilename="";
+    sarge.getFlag("background_file", bgfilename);
     
     // get input files
     std::vector<std::string> inputfiles;
@@ -297,9 +302,12 @@ int main(int argc, const char* argv[]){
     
     // misc variables to keep track of things in each file
     std::map<int,TH1*> histos_to_fit;
+    std::map<int,TH1*> background_histos;
     TCanvas* c1=nullptr;
     TH1* thehist=nullptr;
+    TH1* bghist=nullptr;
     TFile* infile=nullptr;    // close when we're done
+    TFile* bginfile=nullptr;  // file for background-only histograms
     std::map<int,int> types;  // types of input files, .C or .root. Just to check we don't mix.
     int analysed_histo_count=0;
     int offsetcount=0;
@@ -308,6 +316,44 @@ int main(int argc, const char* argv[]){
     // construct the fit function
     DEAPFitFunction deapfitter(max_pes);
     deapfitter.MakeFullFitFunction();
+    
+    // ===========================================
+    // SCAN FOR HISTOGRAMS IN THE BACKGROUNDS FILE
+    // ===========================================
+    // we only have one of these so may as well do it first
+    if(bgfilename!=""){
+        std::cout<<"Retrieving background histograms from "<<bgfilename<<std::endl;
+        bginfile = TFile::Open(bgfilename.c_str(),"READ");
+        // pull out all the pulse charge distribution histograms
+        TKey *key=nullptr;
+        TIter getnextkey(infile->GetListOfKeys());
+        // loop over objects in file
+        std::cout<<"looping over keys"<<std::endl;
+        while ((key = (TKey*)getnextkey())){
+            if(key==nullptr){
+                std::cerr<<"null key!"<<std::endl;
+                continue;
+            }
+            //std::cout<<"processing key " << key->GetName()<<std::endl;
+            TClass *cl = gROOT->GetClass(key->GetClassName());
+            // skip unless it's a histogram
+            if (!cl->InheritsFrom("TH1")) continue;
+            //std::cout<<"it's a histo"<<std::endl;
+            // check if it's a charge distribution
+            // histogram names are "hist_charge_xxx" where xxx is the ToolAnalysis detectorkey for that PMT.
+            std::string histname = key->GetName();
+            int detectorkey;
+            int n = 0;
+            int cnt = sscanf(histname.c_str(),"hist_charge_%d %n",&detectorkey, &n);
+            int success = ((n >0) && ((histname.c_str())[n]=='\0'));
+            if(success){
+                std::cout<<"Found background histogram "<<histname<<std::endl;
+                // read the histogram from the file into memory(?) and get a pointer
+                thehist = (TH1*)key->ReadObj();  // should we call thehist->Delete() when we're done with it?
+                background_histos.emplace(detectorkey,thehist);
+            }
+        } // end loop over keys in file
+    } // end if we have a background file
     
     // scan over input files and pull the histograms we're going to analyse
     for(std::string& filename : inputfiles){
@@ -440,6 +486,11 @@ int main(int argc, const char* argv[]){
             int detkey = ahisto.first;
             thehist = ahisto.second;
             if(thehist==nullptr){ std::cerr<<"No hist"<<std::endl; return 0; }
+            if(background_histos.count(detkey)){
+                bghist = background_histos.at(detkey);
+            } else {
+                bghist = nullptr;
+            }
             std::string histname = thehist->GetName();
             SourceFileHistName = histname;
             histname += "_"+std::to_string(Voltage)+"V";
@@ -450,6 +501,18 @@ int main(int argc, const char* argv[]){
                     ++offsetcount;
                     continue;
                 }
+            }
+            
+            // Fit Background Histogram
+            // ========================
+            // this is required for our third prior estimation method,
+            // but probably provides better pedestal priors in any case, so call it now
+            // the same applies for estimating the mean npe
+            int pedestal_fit_success=1;
+            if(bghist!=nullptr){
+                // this determines the pedestal mean and sigma
+                pedestal_fit_success = deapfitter.FitPedestal();
+                deapfitter.EstimateMeanNPE();
             }
             
             // First Viability Check
@@ -531,10 +594,11 @@ int main(int argc, const char* argv[]){
             // ======================
             // if we have enough bins to work with, try to find a peak & valley in them
             bool found_spe_peak=false;
+            bool force_fit=false;  // whether to fit based on fermi SPE position, even if we didn't find a peak
             std::vector<double> precheck_pars; // access to PeakScan results if we pass the scan
             if(not just_gaussian){
                 // pass to the fitter
-                deapfitter.SetHisto(thehist);
+                deapfitter.SetHisto(thehist, bghist);
                 deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
                 // ↑ FIXME for histos with a small number of bins TH1::Smooth ADDS valleys!
                 // hopefully these are filtered out by the previous scan....
@@ -543,8 +607,33 @@ int main(int argc, const char* argv[]){
                 found_spe_peak = deapfitter.PeakScan(&precheck_pars);
             }
             
+            // Third Viability Check
+            // =====================
+            // our final check is based on the fermilab publication
+            // 'a model-independent approach to SPE calibration of PMTs' (arXiv:1602.03150v1)
+            // courtesy of T. Pearshing
+            if((not found_spe_peak) && (pedestal_fit_success==0)){ // we require a "successful" fit of background
+                std::vector<double> specheck_pars;                 // though 0 doesn't always mean a *good* fit...
+                deapfitter.EstimateSPE(&specheck_pars);
+                // This method should always return an estimate of the mean spe charge.
+                // The viability selection is whether we think it's far enough out of the pedestal
+                // for the deapfitter not to hang in the fit attempt.
+                // 
+                // XXX perhaps we could calculate the fit iterations from how far it is out, to prevent that?
+                // TODO or we could fall back to a fit involving a sum of gaussians, or poissons...?
+                // 
+                // for now, just skip histograms where ...
+                // the estimated spe peak is less than 2 sigma from the pedestal mean...?
+                double apedmean  = deapfitter.GetParameter("ped_mean");
+                double apedsigma = deapfitter.GetParameter("ped_sigma");
+                double ameanspeq = deapfitter.GetParameter("mean_spe_charge");
+                if(ameanspeq>(apedmean+2.*apedsigma)){
+                    force_fit = true;
+                }
+            }
+            
             // update our counter of viable histograms if it passes both pre-test checks
-            if(found_spe_peak){
+            if(found_spe_peak||force_fit){
                 histos_with_a_peak++;
                 // if all we're doing is counting viable histograms, we can move on
                 if(prescan_only){
@@ -557,7 +646,7 @@ int main(int argc, const char* argv[]){
             
             // if we DID find an peak, update our offset counter (which only counts those passing the cut)
             // and now check if we've reached our starting point
-            if(precut && found_spe_peak){
+            if(precut && (found_spe_peak||force_fit)){
                 // in this case offset & histos_to_analyse only count histograms after they've passed PeakScan
                 if(offsetcount<offset){
                     ++offsetcount;
@@ -567,7 +656,7 @@ int main(int argc, const char* argv[]){
             
             // if we *didn't* pass both our pre-flight checks, but we *are* supposed to analyse this histo,
             // write the histo and TTree entry to file before moving on
-            if((not found_spe_peak) && (not offsetcount<offset)){
+            if((not (found_spe_peak||force_fit)) && (not offsetcount<offset)){
                 // save histograms we skip, so we have a complete set and we can see what we missed
                 outfile->cd();
                 thehist->Write(histname.c_str());
@@ -615,18 +704,8 @@ int main(int argc, const char* argv[]){
             deapfitter.ScaleHistoXrange(xscaling);     // fix X-axis to picoCoulombs
             deapfitter.ScaleHistoYrange();             // normalise bin counts to unit integral
             deapfitter.SetRanges();                    // update internal ranges
-            deapfitter.GeneratePriors();               // generate a "suitable" set of priors (needs improvement)
+            deapfitter.GeneratePriors(nullptr, nullptr, force_fit);  // generate a "suitable" set of priors
                                                        // Also sets the internal parameter limits, FYI
-            
-            /*
-            // TODO derive this from occupancy
-            deapfitter.FixParameter("mean_npe", 0.1);
-            
-            // TODO derive this from pedestal-only waveform fits
-            deapfitter.FixParameter("ped_scaling", ped_scaling);
-            deapfitter.FixParameter("ped_mean", ped_mean);
-            deapfitter.FixParameter("ped_sigma", ped_sigma);
-            */
             
 #ifdef STORE_PRIORS
             // retrieve priors and add to the file for debugging
@@ -830,6 +909,14 @@ int main(int argc, const char* argv[]){
         }
         
     } // end loop over input files
+    
+    // close background file if we had one
+    if(bginfile){
+        std::cout<<"Closing input background file"<<std::endl;
+        bginfile->Close();
+        delete bginfile;
+        bginfile = nullptr;
+    }
     
     // close ROOT file if we had one
     if(outfile){

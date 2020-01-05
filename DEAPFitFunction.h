@@ -39,7 +39,8 @@ class DEAPFitFunction {
 	~DEAPFitFunction();
 	
 	// misc setters
-	void SetHisto(TH1* histo);                         // the histogram to fit
+	void SetHisto(TH1* histo, TH1* bg_histo=nullptr);  // the histogram(s) to fit
+	void SetBackgroundHisto(TH1* histo);               // background-only histogram
 	// ranges
 	void SetPedestalRange(double min=0, double max=0);
 	void SetSpeRange(double min=0, double max=0);
@@ -51,9 +52,12 @@ class DEAPFitFunction {
 	TH1* ScaleHistoXrange(double inscaling);
 	TH1* ScaleHistoYrange(double inscaling=0);
 	TH1* SmoothHisto(int smoothing=1);
-	bool PeakScan(std::vector<double>* precheck_pars=nullptr); // search for a peak to use in determining priors
+	int FitPedestal(std::vector<double>* ped_pars=nullptr);       // fit pedestal-only histogram
+	bool PeakScan(std::vector<double>* precheck_pars=nullptr);    // search for a peak for determining priors
+	double EstimateMeanNPE();                                     // estimate occupancy
+	bool EstimateSPE(std::vector<double>* specheck_pars=nullptr); // fermi method to estimate posn of SPE peak
 	bool GeneratePriors(std::vector<double>* fit_pars=nullptr,
-						std::vector<std::pair<double,double>>* par_limits=nullptr); // run PeakScan first!
+						std::vector<std::pair<double,double>>* par_limits=nullptr, bool force_fit=false);
 	
 	// parameter setters
 	void SetPrescaling(const double &prescaling_in);
@@ -110,6 +114,7 @@ class DEAPFitFunction {
 	TF1* GetFullFitFunction();
 	TF1* GetPedFunc();
 	TF1* GetSPEFunc();
+	TF1* GetBackgroundFunc();
 	std::vector<TF1*> GetNPEFuncs();
 	std::vector<TF1Convolution*> GetNPEConvs();
 	std::vector<double> GetNPEPars();
@@ -126,6 +131,8 @@ class DEAPFitFunction {
 	private:
 	// misc variables
 	TH1* thehist=nullptr;                         // the histogram being worked on
+	TH1* bghist=nullptr;                          // background-only histogram for pedestal estimation
+	TF1* pedestal_standalone=nullptr;             // holds pedestal fit of background-only histogram, a "gaus"
 	TF1* pedestal_func=nullptr;                   // holds the shape of the pedestal, a TMath::Gaus
 	TF1* spe_func=nullptr;                        // holds the shape of the SPE peak
 	TF1* full_fit_func=nullptr;                   // we may do the entire fitting internally
@@ -159,6 +166,11 @@ class DEAPFitFunction {
 	int peaktovalleymin=5;                        // peak must be this much above minima to reject noise XXX tuneme
 	bool spe_peak_found=false;
 	
+	// parameters used to keep track of what we've called, which affects how we generate priors
+	bool ran_fit_pedestal=false;
+	bool ran_estimate_spe=false;
+	bool ran_estimate_mean_npe=false;
+	
 	// fit parameters
 	double prescaling=-1;
 	double ped_scaling=-1;
@@ -173,6 +185,10 @@ class DEAPFitFunction {
 	double spe_expl_scaling=-1;
 	double spe_expl_charge_scaling=-1;
 	double mean_npe=-1;
+	
+	// other derived numbers
+	double mean_spe_charge=-1;                   // estimated by EstimateSPE, or from fit by GetMeanSPECharge
+	double spe_charge_variance=-1;               // estimated by EstimateSPE
 	
 	// fit parameter ranges
 	std::vector<std::pair<double,double>> fit_parameter_ranges;
