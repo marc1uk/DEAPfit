@@ -375,7 +375,10 @@ int main(int argc, const char* argv[]){
     std::map<std::string,double> voltage_list;
     if(inputfiles.size()==1){
         std::string file_list=inputfiles.front();
-        if(file_list.substr(0,file_list.length()-4)==".txt"){
+        std::cout<<"only given one input file, name is "<<file_list
+                 <<", extention is "<<file_list.substr(0,file_list.length()-4)<<std::endl;
+        if(file_list.substr(file_list.length()-4,file_list.length())==".txt"){
+            std::cout<<"Passed an input file list "<<file_list<<", parsing it now"<<std::endl;
             std::ifstream fin (file_list.c_str());
             if(not fin.is_open()){
                 std::cerr<<"Error reading file list "<<inputfiles.front()<<"!"<<std::endl;
@@ -392,6 +395,7 @@ int main(int argc, const char* argv[]){
             inputfiles.clear(); // we'll rebuild this from the contents of the file list
             // loop over lines in file
             while (getline(fin, Line)){
+                //std::cout<<"Read Line: "<<Line<<std::endl;
                 if (Line.empty()) continue;
                 if (Line[0] == '#') continue;
                 ssL.str("");
@@ -399,11 +403,17 @@ int main(int argc, const char* argv[]){
                 ssL << Line;
                 // extract the histogram variables
                 if (ssL.str() != ""){
+                    //std::cout<<"Extracting variables"<<std::endl;
                     ssL >> rootfile >> rrun >> ssubrun >> histname >> vvoltage;
+                } else {
+                    continue;
                 }
+                //std::cout<<"rootfile: "<<rootfile<<", run: "<<rrun<<", subrun: "<<ssubrun
+                //         <<", histname: "<<histname<<", voltage: "<<vvoltage<<std::endl;
                 
                 // if this line is a new file
                 if(rootfile!=lastrootfile){
+                    //std::cout<<"New file: "<<rootfile<<std::endl;
                     // note our transition to a new file
                     lastrootfile=rootfile;
                     // add it to the list of input files to process
@@ -422,6 +432,9 @@ int main(int argc, const char* argv[]){
                 voltage_list.emplace(uniquekey,vvoltage);
             } // end loop over file lines
             fin.close();
+            std::cout<<"File list parsing found "<<histogram_selection.size()<<" files containing "
+                     <<voltage_list.size()<<" histograms to fit"<<std::endl;
+
         } // end if extension is txt
     } // end if we were only passed 1 input file
     
@@ -599,6 +612,9 @@ int main(int argc, const char* argv[]){
             } else {
                 bghist = nullptr;
             }
+            // pass to the fitter
+            deapfitter.SetHisto(thehist, bghist);
+            
             std::string histname = thehist->GetName();
             if(input_file_list){
                 // voltage setpoints may vary between PMTs in this file
@@ -633,8 +649,8 @@ int main(int argc, const char* argv[]){
             // not just those viable for fit. increment our histo counter
             // and skip if less than our starting index
             if(precut==0){
+                ++offsetcount;
                 if(offsetcount<offset){
-                    ++offsetcount;
                     continue;
                 }
             }
@@ -733,8 +749,6 @@ int main(int argc, const char* argv[]){
             bool force_fit=false;  // whether to fit based on fermi SPE position, even if we didn't find a peak
             std::vector<double> precheck_pars; // access to PeakScan results if we pass the scan
             if(not just_gaussian){
-                // pass to the fitter
-                deapfitter.SetHisto(thehist, bghist);
                 deapfitter.SmoothHisto();  // This seems to help the fit hit the broad SPE position better
                 
                 // Scan for a second peak after pedestal
@@ -746,8 +760,10 @@ int main(int argc, const char* argv[]){
             // our final check is based on the fermilab publication
             // 'a model-independent approach to SPE calibration of PMTs' (arXiv:1602.03150v1)
             // courtesy of T. Pearshing
-            if((not found_spe_peak) && (pedestal_fit_success==0)){ // we require a "successful" fit of background
-                std::vector<double> specheck_pars;                 // though 0 doesn't always mean a *good* fit...
+            // we require a "successful" fit of a background-only histogram for this method
+            // though a fit result of 0 doesn't always mean a *good* fit...
+            if((not just_gaussian) && (not found_spe_peak) && (pedestal_fit_success==0)){
+                std::vector<double> specheck_pars;
                 deapfitter.EstimateSPE(&specheck_pars);
                 // This method should always return an estimate of the mean spe charge.
                 // The viability selection is whether we think it's far enough out of the pedestal
@@ -789,9 +805,11 @@ int main(int argc, const char* argv[]){
             // if precut == 1, offset & histos_to_analyse only consider histograms passing
             // viability checks. So if precut ==1, check if this histogram passes viability checks,
             // and if so increment our histo counter and skip if less than our starting index
-            if(precut && (found_spe_peak||force_fit)){
-                if(offsetcount<offset){
+            if(precut){
+                if(found_spe_peak||force_fit){
                     ++offsetcount;
+                }
+                if(offsetcount<offset){
                     continue;
                 }
             }
@@ -800,7 +818,7 @@ int main(int argc, const char* argv[]){
             // =========================
             // if we *didn't* pass both our pre-flight checks, but we *are* supposed to analyse this histo,
             // write the histo and TTree entry to file and move on to the next histo
-            if((not (found_spe_peak||force_fit)) && (not offsetcount<offset)){
+            if(not (found_spe_peak||force_fit) ){
                 // save histograms we skip, so we have a complete set and we can see what we missed
                 outfile->cd();
                 thehist->Write(histname.c_str());
@@ -892,6 +910,13 @@ int main(int argc, const char* argv[]){
             thehist->Draw();
             thehist->ResetBit(kCanDelete);  // ROOT, plz... stop deleting my stuff
             thehist->SetDirectory(0);
+            // just for indication, show whether PeakScan succeeded, or whether we're falling back
+            // to using the Fermi estimation of SPE position
+            if(not found_spe_peak){
+                deapfitter.GetFullFitFunction()->SetLineColor(kMagenta);
+            } else {
+                deapfitter.GetFullFitFunction()->SetLineColor(kRed);
+            }
             deapfitter.GetFullFitFunction()->Draw("same");
             gPad->SetLogy();
             c1->Modified();
