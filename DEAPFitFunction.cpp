@@ -221,9 +221,12 @@ bool DEAPFitFunction::PeakScan(std::vector<double>* precheck_pars){
 				max2=bincont; maxpos2=bini;
 		}
 	}
-	std::cout<<"Found pedestal at "<<maxpos1<<" with counts "<<max1<<std::endl;
-	std::cout<<"Found valley at "<<interpos<<" with counts "<<intermin<<std::endl;
-	std::cout<<"Found a SPE peak at "<<maxpos2<<" with counts "<<max2<<std::endl;
+	std::cout<<"Found pedestal at "<<maxpos1<<" ("<<thehist->GetBinCenter(maxpos1)<<")"
+		 <<" with counts "<<max1<<std::endl;
+	std::cout<<"Found valley at "<<interpos<<" ("<<thehist->GetBinCenter(interpos)<<")"
+		 <<" with counts "<<intermin<<std::endl;
+	std::cout<<"Found a SPE peak at "<<maxpos2<<" ("<<thehist->GetBinCenter(maxpos2)<<")"
+		<<" with counts "<<max2<<std::endl;
 	spe_peak_found = ((max2>10)&&(maxpos2>0));
 	
 	// copy the intermediate pars in case user wants them
@@ -469,6 +472,9 @@ bool DEAPFitFunction::GeneratePriors(std::vector<double>* fit_pars, std::vector<
 		spe_firstgamma_mean = spe_mean_guess;   // controls posn of peak by stretching from the LH edge
 		spe_firstgamma_shape = 10;              // an arbitrary shape factor. (1/b in the paper)
 	}
+	// a little fine tuning
+	spe_firstgamma_scaling /= 23.;
+	spe_firstgamma_scaling *= (1./spe_firstgamma_mean);
 	// the shape parameter controls how skewed left (low values) or symmetric (higher values) the peak is.
 	// more symmetric (higher) values also narrows the distribution.
 	// minimum of 1, almost a triangle vertical at the left edge, max >100, for nearly gaussian
