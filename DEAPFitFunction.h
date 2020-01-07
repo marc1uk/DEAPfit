@@ -60,6 +60,8 @@ class DEAPFitFunction {
 						std::vector<std::pair<double,double>>* par_limits=nullptr, bool force_fit=false);
 	
 	// parameter setters
+	int SetParameter(std::string par_name, double par_value);
+	int SetParameter(int par_i, double par_value);
 	void SetPrescaling(const double &prescaling_in);
 	void SetPedScaling(const double &ped_scaling_in);
 	void SetPedMean(const double &ped_mean_in);
@@ -78,6 +80,7 @@ class DEAPFitFunction {
 	int SetParameters(std::vector<double> fit_parameters);  // returns 1 on success
 	void SetParameters(double* fit_parameters);
 	int SetParameterLimits(std::vector<std::pair<double,double>> ranges_in);
+	int SetParameterLimits(int par_i, std::pair<double,double> range_in);
 	void RefreshParameters();  // pass internal member parameters to internal functions
 	
 	// parameter fixers
@@ -101,6 +104,8 @@ class DEAPFitFunction {
 	std::vector<double> GetParameters();
 	double GetParameter(std::string parname);
 	std::vector<std::pair<double,double>> GetParameterLimits();
+	std::pair<double,double> GetParameterLimits(std::string par_name);
+	std::pair<double,double> GetParameterLimits(int par_i);
 	double GetXscaling();
 	double GetYscaling();
 	
@@ -124,6 +129,8 @@ class DEAPFitFunction {
 	
 	// Operators on the TF1
 	TF1* NameParameters(TF1* thefunc=nullptr);       // set names of parameters
+	std::string ParameterNumberToName(int par_i);    // misc
+	int ParameterNameToNumber(std::string par_name); // misc
 	void ConstructFunctions();                       // construct the TF1s needed by the FullFitFunction
 	TF1* MakeFullFitFunction();                      // construct TF1 internally. Do not delete the returned object!
 	TFitResultPtr FitTheHisto(std::string opts="");  // call TH1::Fit with internal FullFitFunction

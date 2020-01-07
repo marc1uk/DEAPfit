@@ -4,6 +4,7 @@ DEAPFitFunction::DEAPFitFunction(int max_pes_in){
 	// constructor
 	max_pes = max_pes_in;
 	ConstructFunctions();
+	fit_parameter_ranges = std::vector<std::pair<double,double>>(14,std::pair<double,double>{0,0});
 }
 
 DEAPFitFunction::~DEAPFitFunction(){
@@ -616,7 +617,46 @@ TF1* DEAPFitFunction::NameParameters(TF1* thefunc){
 	return thefunc;
 }
 
+int DEAPFitFunction::ParameterNameToNumber(std::string par_name){
+	int par_i=-1;
+	if(par_name=="prescaling"){ par_i = 0; }
+	if(par_name=="ped_scaling"){ par_i = 1; }
+	if(par_name=="ped_mean"){ par_i = 2; }
+	if(par_name=="ped_sigma"){ par_i = 3; }
+	if(par_name=="spe_firstgamma_scaling"){ par_i = 4; }
+	if(par_name=="spe_firstgamma_mean"){ par_i = 5; }
+	if(par_name=="spe_firstgamma_shape"){ par_i = 6; }
+	if(par_name=="spe_secondgamma_scaling"){ par_i = 7; }
+	if(par_name=="spe_secondgamma_mean_scaling"){ par_i = 8; }
+	if(par_name=="spe_secondgamma_shape_scaling"){ par_i = 9; }
+	if(par_name=="spe_expl_scaling"){ par_i = 10; }
+	if(par_name=="spe_expl_charge_scaling"){ par_i = 11; }
+	if(par_name=="mean_npe"){ par_i = 12; }
+	if(par_name=="max_pes"){ par_i = 13; }
+	return par_i;
+}
+
+std::string DEAPFitFunction::ParameterNumberToName(int par_i){
+	std::string par_name = "unknown";
+	if(par_i==0){ par_name = "prescaling"; }
+	if(par_i==1){ par_name = "ped_scaling"; }
+	if(par_i==2){ par_name = "ped_mean"; }
+	if(par_i==3){ par_name = "ped_sigma"; }
+	if(par_i==4){ par_name = "spe_firstgamma_scaling"; }
+	if(par_i==5){ par_name = "spe_firstgamma_mean"; }
+	if(par_i==6){ par_name = "spe_firstgamma_shape"; }
+	if(par_i==7){ par_name = "spe_secondgamma_scaling"; }
+	if(par_i==8){ par_name = "spe_secondgamma_mean_scaling"; }
+	if(par_i==9){ par_name = "spe_secondgamma_shape_scaling"; }
+	if(par_i==10){ par_name = "spe_expl_scaling"; }
+	if(par_i==11){ par_name = "spe_expl_charge_scaling"; }
+	if(par_i==12){ par_name = "mean_npe"; }
+	if(par_i==13){ par_name = "max_pes"; }
+	return par_name;
+}
+
 // Parameter Setters
+// TODO these should change the limits and expand them as necessary
 void DEAPFitFunction::SetPrescaling(const double &prescaling_in){
 	prescaling = prescaling_in;
 	if(full_fit_func!=nullptr) full_fit_func->SetParameter("prescaling", prescaling);
@@ -673,6 +713,59 @@ void DEAPFitFunction::SetMaxNpe(const double &max_pes_in){
 	max_pes = max_pes_in;
 	if(full_fit_func!=nullptr) full_fit_func->SetParameter("max_pes", max_pes);
 	ConstructFunctions(); // in case we need to construct more TF1s
+}
+
+int DEAPFitFunction::SetParameter(std::string par_name, double par_value){
+	// check we know this parameter
+	int par_i = ParameterNameToNumber(par_name);
+	if(par_i<0){
+		std::cerr<<"DEAPFitFunction::SetParameter unknown parameter "<<par_name<<std::endl;
+		return -1;
+	}
+	
+	return SetParameter(par_i, par_value);
+}
+
+int DEAPFitFunction::SetParameter(int par_i, double par_value){
+	// check parameter number in range
+	if((par_i<0) || (par_i>fit_parameter_ranges.size())){
+		std::cerr<<"DEAPFitFunction::SetParameter parameter number "<<par_i<<" out of range"<<std::endl;
+		return -1;
+	}
+	
+	// update the limits first if we need to
+	std::pair<double,double> the_limits = fit_parameter_ranges.at(par_i);
+	if(par_value<the_limits.first){
+		SetParameterLimits(par_i, std::pair<double,double>{par_value,the_limits.second});
+	} else if(par_value>the_limits.second){
+		SetParameterLimits(par_i, std::pair<double,double>{the_limits.first,par_value});
+	}
+	
+	// convert to name for ease
+	std::string par_name = ParameterNumberToName(par_i);
+	if(par_name=="unknown"){
+		std::cerr<<"DEAPFitFunction::Unknown parameter number "<<par_i<<std::endl;
+		return -1;
+	}
+	
+	// set accordingly
+	if(par_name=="prescaling"){ prescaling = par_value; }
+	if(par_name=="ped_scaling"){ ped_scaling = par_value; }
+	if(par_name=="ped_mean"){ ped_mean = par_value; }
+	if(par_name=="ped_sigma"){ ped_sigma = par_value; }
+	if(par_name=="spe_firstgamma_scaling"){ spe_firstgamma_scaling = par_value; }
+	if(par_name=="spe_firstgamma_mean"){ spe_firstgamma_mean = par_value; }
+	if(par_name=="spe_firstgamma_shape"){ spe_firstgamma_shape = par_value; }
+	if(par_name=="spe_secondgamma_scaling"){ spe_secondgamma_scaling = par_value; }
+	if(par_name=="spe_secondgamma_mean_scaling"){ spe_secondgamma_mean_scaling = par_value; }
+	if(par_name=="spe_secondgamma_shape_scaling"){ spe_secondgamma_shape_scaling = par_value; }
+	if(par_name=="spe_expl_scaling"){ spe_expl_scaling = par_value; }
+	if(par_name=="spe_expl_charge_scaling"){ spe_expl_charge_scaling = par_value; }
+	if(par_name=="mean_npe"){ mean_npe = par_value; }
+	if(par_name=="max_pes"){ max_pes = par_value; }
+	RefreshParameters();
+	
+	return 1;
 }
 
 // Parameter fixers: set the parameter and do not vary it during fitting
@@ -813,7 +906,7 @@ int DEAPFitFunction::SetParameterLimits(std::vector<std::pair<double,double>> ra
 			 <<"DEAPFitFunction::SetParameterLimits!"<<std::endl
 			 <<"Expected 13 (14 including max_npes), got "<<ranges_in.size()<<std::endl
 			 <<"NO PARAMETERS WILL BE SET"<<std::endl;
-		return 0;
+		return -1;
 	} else if(ranges_in.size()>14){
 		std::cerr<<"WARNING: Too many parameters passed to DEAPFitFunction::SetParameterLimits!"<<std::endl
 			 <<"Expected 13 (14 including max_npes), got "<<ranges_in.size()<<std::endl
@@ -830,6 +923,52 @@ int DEAPFitFunction::SetParameterLimits(std::vector<std::pair<double,double>> ra
 		}
 	}
 	return 1;
+}
+
+// TODO: check for parameters outside new limits and coerce into range
+// TODO: other setters for specific parameter ranges
+int DEAPFitFunction::SetParameterLimits(int par_i, std::pair<double,double> range_in){
+	if((par_i<0) || (par_i>=fit_parameter_ranges.size())){
+		std::cerr<<"DEAPFitFunction::SetParameterLimits parameter number "<<par_i
+			 <<"out of range 0-"<<fit_parameter_ranges.size()<<std::endl;
+		return -1;
+	}
+	fit_parameter_ranges.at(par_i) = range_in;
+	
+	if(full_fit_func!=nullptr){
+		for(int pari=0; pari<fit_parameter_ranges.size(); pari++){
+			full_fit_func->SetParLimits(pari,
+						    fit_parameter_ranges.at(pari).first,
+						    fit_parameter_ranges.at(pari).second);
+		}
+	}
+	return 1;
+}
+
+std::pair<double,double> DEAPFitFunction::GetParameterLimits(std::string par_name){
+	
+	// convert name into number, since limits are in a vector not a map
+	int par_i = ParameterNameToNumber(par_name);
+	if(par_i<0){
+		std::cerr<<"DEAPFitFunction::GetParameterLimits for unknown parameter "<<par_name<<std::endl;
+		return std::pair<double,double>{0,0};
+	}
+	
+	if(par_i>=fit_parameter_ranges.size()){
+		std::cerr<<"DEAPFitFunction::GetParameterLimits internal limits vector too small?"<<std::endl;
+		return std::pair<double,double>{0,0};
+	}
+	
+	return fit_parameter_ranges.at(par_i);
+}
+
+std::pair<double,double> DEAPFitFunction::GetParameterLimits(int par_i){
+	if((par_i<0) || (par_i>=fit_parameter_ranges.size()) ){
+		std::cerr<<"DEAPFitFunction::GetParameterLimits; parameter number "<<par_i
+			 <<" is out of range 0-"<<(fit_parameter_ranges.size()-1)<<std::endl;
+		return std::pair<double,double>{0,0};
+	}
+	return fit_parameter_ranges.at(par_i);
 }
 
 std::vector<double> DEAPFitFunction::GetParameters(){
