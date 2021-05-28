@@ -1,0 +1,3 @@
+'dip' in region between pedestal and SPE peak that can't well be matched by the linear component:
+this is because pedestal is not gaussian but poisson. 
+TODO: try replacing the pedestal gaussian with a poisson distribution instead
